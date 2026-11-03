@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="vi" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>VibeRead — Nghe truyện đúng vibe</title>
+<meta name="theme-color" content="#0c0f12">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..700;1,9..144,300..700&family=Newsreader:opsz,wght@6..72,400..600&family=Be+Vietnam+Pro:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="/app.css">
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script defer src="/app.js"></script>
+</head>
+<body>
+<canvas id="hero" aria-hidden="true"></canvas><div class="orb" aria-hidden="true"></div><div class="grain" aria-hidden="true"></div>
+<header class="bar">
+  <a class="brand" href="#/"><i class="eq" aria-hidden="true"><b></b><b></b><b></b></i>VibeRead</a>
+  <div class="bar-r"><span id="tts-chip" class="chip" hidden></span><button id="open-settings" class="ic" aria-label="Cài đặt"><svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg></button></div>
+</header>
+<main id="app">
+  <section id="v-home" class="view">
+    <p class="kicker st" style="--i:0">Web novel · Audiobook · Tự chuyển chương</p>
+    <h1 class="st" style="--i:1">Nghe truyện<br><em>đúng vibe.</em></h1>
+    <form id="add" class="st" style="--i:2" autocomplete="off">
+      <input id="url" type="url" inputmode="url" placeholder="Dán link truyện hoặc link chương đang đọc" aria-label="Link truyện" required>
+      <button id="go"><span>Nghe</span></button>
+    </form>
+    <p class="hint st" style="--i:3">Dán link → app tự nhận diện → đọc bằng giọng Việt → hết chương tự sang chương sau.</p>
+    <section class="recent st" style="--i:4"><h2>Đang nghe dở</h2><div id="recent"></div></section>
+  </section>
+
+  <section id="v-novel" class="view" hidden>
+    <div id="novel-head"></div><ol id="chapters" class="chlist"></ol>
+  </section>
+
+  <section id="v-read" class="view" hidden>
+    <p class="kicker" id="ch-kicker"></p>
+    <h1 class="ch" id="ch-title"></h1>
+    <div id="banner" hidden></div>
+    <article id="text" aria-live="off"></article>
+    <div id="state"></div>
+  </section>
+</main>
+
+<footer id="dock" hidden>
+  <div class="dock-in">
+    <button id="play" class="ringbtn" aria-label="Phát / Tạm dừng">
+      <svg viewBox="0 0 64 64"><circle class="trk" cx="32" cy="32" r="27"/><circle id="ring" class="prg" cx="32" cy="32" r="27"/><g transform="translate(16 16)"><path id="morph" d=""/></g></svg>
+    </button>
+    <button id="meta" class="meta"><strong id="d-title">—</strong><span id="d-sub"></span></button>
+    <i class="eq big" aria-hidden="true"><b></b><b></b><b></b><b></b></i>
+    <button id="stay" class="pill" hidden>Ở lại</button>
+    <div class="ctl">
+      <button id="prev" class="ic" aria-label="Chương trước"><svg viewBox="0 0 24 24"><path d="M6 5v14M19 5l-9 7 9 7z"/></svg></button>
+      <button id="next" class="ic" aria-label="Chương sau"><svg viewBox="0 0 24 24"><path d="M18 5v14M5 5l9 7-9 7z"/></svg></button>
+      <button id="speed" class="pill">1x</button>
+    </div>
+  </div>
+</footer>
+
+<aside id="sheet" hidden>
+  <div class="scrim" data-close></div>
+  <div class="panel" role="dialog" aria-label="Cài đặt">
+    <div class="ph"><h2>Cài đặt</h2><button class="ic" data-close aria-label="Đóng"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+    <label>Giao diện<div class="seg" id="s-theme"><button data-v="dark">Tối</button><button data-v="sepia">Sepia</button><button data-v="light">Sáng</button></div></label>
+    <label>Cỡ chữ <output id="o-fs"></output><input id="s-fs" type="range" min="16" max="30" step="1"></label>
+    <label>Giãn dòng <output id="o-lh"></output><input id="s-lh" type="range" min="1.4" max="2.4" step=".1"></label>
+    <label>Giọng đọc<select id="s-voice"><option value="">Mặc định</option></select></label>
+    <label class="row">Tải trước chương sau<input id="s-pf" type="checkbox"></label>
+    <label>API key Anthropic (để dịch)<input id="s-key" type="password" placeholder="sk-ant-… (lưu cục bộ trên máy)" autocomplete="off"></label>
+    <p class="hint" id="s-info"></p>
+  </div>
+</aside>
+<div id="toast" role="status"></div>
+</body>
+</html>

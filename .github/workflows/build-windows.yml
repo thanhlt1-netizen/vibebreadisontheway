@@ -1,0 +1,33 @@
+name: Build Windows installer
+on:
+  workflow_dispatch:
+    inputs:
+      bundle_model: { description: "Đóng gói sẵn model giọng đọc (cài offline, file lớn hơn)", type: boolean, default: true }
+  push: { tags: ["v*"] }
+permissions: { contents: write }
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults: { run: { working-directory: apps/api } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11", cache: pip }
+      - run: pip install -r requirements-desktop.txt pillow
+      - run: python make_icon.py
+      - name: Tải model để đóng gói sẵn
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.bundle_model }}
+        run: python prefetch_model.py
+      - run: python build_desktop.py
+      - name: WebView2 bootstrapper
+        run: Invoke-WebRequest "https://go.microsoft.com/fwlink/p/?LinkId=2124703" -OutFile installer/MicrosoftEdgeWebview2Setup.exe
+      - run: choco install innosetup -y --no-progress
+      - name: Tạo bộ cài
+        run: |
+          $v = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}".TrimStart("v") } else { "0.1.0" }
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=$v" installer\VibeRead.iss
+      - uses: actions/upload-artifact@v4
+        with: { name: VibeRead-Setup, path: apps/api/dist-installer/VibeRead-Setup.exe }
+      - uses: softprops/action-gh-release@v2
+        if: github.ref_type == 'tag'
+        with: { files: apps/api/dist-installer/VibeRead-Setup.exe }
