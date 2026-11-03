@@ -5,7 +5,8 @@ CLOUD_URL = env("VIENEU_CLOUD_URL", "https://api.vieneu.io/api/v1")
 LOCAL_URL = env("VIENEU_LOCAL_URL", "http://localhost:8000/v1")
 LOCAL_MODEL = env("VIENEU_LOCAL_MODEL", "vieneu-v3-turbo")
 API_KEY = env("VIENEU_API_KEY")
-DEFAULT_VOICE = env("DEFAULT_VOICE", "Ngọc Lan" if TTS_PROVIDER == "cloud" else "Minh Quân Pro")
+# v3 Turbo default preset is "Hải Đăng" ("Minh Quân Pro" is an alias)
+DEFAULT_VOICE = env("DEFAULT_VOICE", "Ngọc Lan" if TTS_PROVIDER == "cloud" else "Hải Đăng")
 CORS = env("CORS_ORIGINS", "http://localhost:3000").split(",")
 import sys
 def _data_dir():

@@ -138,12 +138,16 @@ class SDKProvider(Provider):
 
     def _ensure(self):
         with self._load:
-            if self.tts is None:
-                from tts.model_store import ensure_models, seed_from_bundle
+            if self.tts is not None:
+                return self.tts
+            self.downloading = True
+            self.download_msg = "Dang nap model..."
+            try:
+                from tts.model_store import ensure_models, seed_from_bundle, diagnose
                 from pathlib import Path
 
-                # Prefer any installer-shipped cache if present
                 for cand in (
+                    Path(os.environ.get("VIBEREAD_BUNDLE_HF", "")),
                     Path(os.environ.get("HF_HOME", "")),
                     Path(getattr(__import__("sys"), "_MEIPASS", ".")) / "hf_cache",
                 ):
@@ -157,13 +161,37 @@ class SDKProvider(Provider):
                     self.download_msg = s
 
                 onnx_path, codec_path = ensure_models(progress=prog)
+                diag = diagnose()
+                if diag["onnx_missing"] or diag["codec_missing"]:
+                    raise FileNotFoundError(
+                        "Thieu file model: "
+                        + ", ".join(diag["onnx_missing"] + diag["codec_missing"])
+                        + f" (onnx={onnx_path})"
+                    )
+
                 tts = self._make_tts(onnx_path, codec_path)
+                # Smoke test — must succeed or we keep tts=None
+                voice = config.DEFAULT_VOICE
                 try:
-                    tts.infer("Xin chao cac ban.", voice=config.DEFAULT_VOICE)
-                except Exception:
-                    pass
+                    tts.infer("Xin chao.", voice=voice)
+                except Exception as e1:
+                    # try default preset name
+                    try:
+                        tts.infer("Xin chao.", voice="Hải Đăng")
+                        voice = "Hải Đăng"
+                    except Exception:
+                        raise RuntimeError(f"Model load OK but infer failed: {e1}") from e1
                 self.tts = tts
                 self.err = None
+                self.download_msg = "Model san sang"
+                return self.tts
+            except Exception as e:
+                self.tts = None
+                self.err = f"{e.__class__.__name__}: {e}"
+                self.download_msg = f"Loi: {self.err}"
+                raise
+            finally:
+                self.downloading = False
         return self.tts
 
     def preload_sync(self):
@@ -219,7 +247,18 @@ class SDKProvider(Provider):
 
     def _infer(self, text, voice):
         tts = self._ensure()
-        audio = tts.infer(text, voice=voice)
+        voice = voice or config.DEFAULT_VOICE
+        try:
+            audio = tts.infer(text, voice=voice)
+        except Exception as e:
+            # fallback common presets if wrong voice id
+            if voice not in ("Hải Đăng", "Hai Dang"):
+                try:
+                    audio = tts.infer(text, voice="Hải Đăng")
+                except Exception:
+                    raise RuntimeError(f"infer({voice!r}) failed: {e}") from e
+            else:
+                raise
         fd, path = tempfile.mkstemp(suffix=".wav")
         os.close(fd)
         try:
@@ -233,6 +272,10 @@ class SDKProvider(Provider):
                 pass
 
     async def synth(self, text, voice, alive=None):
+        if self.downloading:
+            raise TTSError(503, "Dang nap/tai model giọng đọc — doi 30-60s roi bam nghe lai")
+        if self.err and self.tts is None:
+            raise TTSError(503, f"Model chua san sang: {self.err}. Mo Cai dat → Tai goi giong doc")
         async with self.lock:
             if alive and not await alive():
                 raise TTSError(499, "Yeu cau da huy")
@@ -242,11 +285,17 @@ class SDKProvider(Provider):
                 ms = (time.perf_counter() - t0) * 1000 / max(len(text), 1)
                 self.ms_per_char = ms if self.ms_per_char is None else self.ms_per_char * 0.7 + ms * 0.3
                 return data
+            except TTSError:
+                raise
             except ImportError:
                 raise TTSError(500, "Chua cai VieNeu: pip install vieneu")
+            except FileNotFoundError as e:
+                self.err = str(e)
+                raise TTSError(500, f"Thieu file model: {e}. Mo Cai dat → Tai goi giong doc")
             except Exception as e:
                 msg = f"{e.__class__.__name__}: {e}"
                 self.err = msg
+                # os error 2 → almost always missing weight/DLL, not "slow"
                 raise TTSError(500, f"VieNeu (local) loi: {e}")
 
     async def cached(self, text, voice, alive=None):

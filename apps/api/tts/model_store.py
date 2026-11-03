@@ -57,10 +57,34 @@ def codec_dir() -> Path:
     return models_root() / "codec"
 
 
+def missing_files(d: Path, required: list[str]) -> list[str]:
+    out = []
+    for f in required:
+        p = d / f
+        if not p.is_file() or p.stat().st_size == 0:
+            out.append(f)
+    return out
+
+
 def _ready(d: Path, required: list[str]) -> bool:
     if not (d / MARKER).is_file():
         return False
-    return all((d / f).is_file() and (d / f).stat().st_size > 0 for f in required)
+    return not missing_files(d, required)
+
+
+def diagnose() -> dict:
+    od, cd = onnx_dir(), codec_dir()
+    need_codec = [f for f in CODEC_FILES if not f.endswith(".json")]
+    return {
+        "onnx_dir": str(od),
+        "codec_dir": str(cd),
+        "onnx_ready": _ready(od, GRAPH_FILES),
+        "codec_ready": _ready(cd, need_codec),
+        "onnx_missing": missing_files(od, GRAPH_FILES),
+        "codec_missing": missing_files(cd, need_codec),
+        "marker_onnx": (od / MARKER).is_file(),
+        "marker_codec": (cd / MARKER).is_file(),
+    }
 
 
 def _download_one(repo: str, filename: str, dest: Path, subfolder: str | None) -> None:

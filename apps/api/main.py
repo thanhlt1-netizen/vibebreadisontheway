@@ -63,6 +63,20 @@ async def tts_status():
         return {"ready": True, "provider": config.TTS_PROVIDER}
     return provider.status()
 
+@app.get("/api/tts/diagnose")
+async def tts_diagnose():
+    """List missing model files / paths for debugging."""
+    out = {"provider": config.TTS_PROVIDER, "data_dir": config.DATA_DIR}
+    if config.TTS_PROVIDER == "sdk":
+        try:
+            from tts.model_store import diagnose
+            out.update(diagnose())
+        except Exception as e:
+            out["error"] = f"{e.__class__.__name__}: {e}"
+        if hasattr(provider, "status"):
+            out["runtime"] = provider.status()
+    return out
+
 @app.get("/api/resolve")
 async def resolve(url: str):
     path = urlparse(url).path.lower()
