@@ -65,7 +65,12 @@ async def tts_status():
 @app.get("/api/resolve")
 async def resolve(url: str):
     path = urlparse(url).path.lower()
-    kind = "chapter" if re.search(r"(chuong|chapter|chap|/c)[-_/]?\d+", path) else "novel"
+    # Nhận diện URL chương: chuong/chapter/chap/ep/episode/part + số, hoặc /c12, /chapter-12.html
+    kind = "chapter" if re.search(
+        r"(chuong|chapter|chap|episode|ep|part|tập|tap|/c)[-_/\.]?\d+",
+        path,
+        re.I,
+    ) else "novel"
     return {"kind": kind, "parser": type(pick(url)).__name__}
 
 @app.get("/api/novel")

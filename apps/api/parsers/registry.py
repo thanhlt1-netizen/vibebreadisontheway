@@ -1,7 +1,10 @@
 from .base import SourceParser
 from .generic import GenericParser
 
-# Thêm parser riêng cho từng nguồn vào đây (đặt trước generic).
+# Thêm parser riêng cho từng nguồn vào đây (đặt TRƯỚC generic để được ưu tiên).
+# Ví dụ:
+#   from .truyenfull import TruyenFullParser
+#   PARSERS = [TruyenFullParser, ...]
 PARSERS: list[type[SourceParser]] = []
 
 def pick(url: str) -> SourceParser:
