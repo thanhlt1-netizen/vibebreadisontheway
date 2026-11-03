@@ -3,6 +3,7 @@ import os, socket, sys, threading, time
 from pathlib import Path
 
 os.environ.setdefault("TTS_PROVIDER", "sdk")
+os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS", "1")
 os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 os.environ.setdefault("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "--autoplay-policy=no-user-gesture-required")
 
