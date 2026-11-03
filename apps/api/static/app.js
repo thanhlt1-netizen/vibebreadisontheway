@@ -53,12 +53,18 @@ function paint(){const n=S.chunks.length,d=$('#dock');d.hidden=!S.ch;$('#d-title
 function setPlaying(b){S.playing=b;morphTo(b?1:0);$('#dock').classList.toggle('playing',b);if('mediaSession'in navigator)navigator.mediaSession.playbackState=b?'playing':'paused';paint()}
 const WIN=()=>S.local?3:1;
 function fetchChunk(i){if(i<0||i>=S.chunks.length)return Promise.resolve(null);
- if(!S.cache.has(i)){const ac=new AbortController(),p=api('/api/tts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:S.chunks[i],voice:settings.voice||undefined}),signal:ac.signal}).then(r=>r.blob()).then(b=>URL.createObjectURL(b));p.catch(()=>{S.cache.delete(i);S.ac.delete(i)});S.cache.set(i,p);S.ac.set(i,ac)}return S.cache.get(i)}
+ if(!S.cache.has(i)){const ac=new AbortController(),p=api('/api/tts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:S.chunks[i],voice:settings.voice||undefined}),signal:ac.signal}).then(async r=>{if(!r.ok){let d='';try{d=await r.text()}catch{};throw new Error(d||('TTS HTTP '+r.status))}return r.blob()}).then(b=>URL.createObjectURL(b));p.catch(()=>{S.cache.delete(i);S.ac.delete(i)});S.cache.set(i,p);S.ac.set(i,ac)}return S.cache.get(i)}
 async function playAt(i){if(!S.chunks.length)return;cancelCd();const tok=++S.tok;S.i=Math.max(0,Math.min(i,S.chunks.length-1));
  for(const[k,v]of[...S.cache]){if(k<S.i-1){v.then(u=>u&&URL.revokeObjectURL(u),()=>{});S.cache.delete(k);S.ac.delete(k)}else if(k>S.i+WIN()){S.ac.get(k)?.abort();S.cache.delete(k);S.ac.delete(k)}}
  setPlaying(true);markActive();saveProgress();
  try{const src=await fetchChunk(S.i);if(tok!==S.tok)return;A.src=src;A.playbackRate=settings.speed;await A.play();if(tok!==S.tok)return;S.resumable=true;for(let k=1;k<=WIN();k++)fetchChunk(S.i+k);maybePrefetch()}
- catch(e){if(tok!==S.tok)return;setPlaying(false);toast(e.name==='NotAllowedError'?'Nhấn ▶ để tiếp tục nghe':e.message)}}
+ catch(e){if(tok!==S.tok)return;
+  if(e.name==='NotAllowedError'){setPlaying(false);toast('Nhấn ▶ để tiếp tục nghe');return}
+  // Skip broken segment and continue if more remain
+  const msg=e.message||String(e);
+  if(S.i+1<S.chunks.length){toast('Đoạn '+(S.i+1)+' lỗi, bỏ qua: '+msg.slice(0,80));S.cache.delete(S.i);playAt(S.i+1)}
+  else{setPlaying(false);toast(msg.includes('VieNeu')||msg.includes('model')||msg.includes('file')?msg+' — mở Cài đặt → Tải gói giọng đọc':msg)}
+ }}
 function toggle(){if(S.cd){cancelCd();return}if(S.playing){A.pause();setPlaying(false)}else if(S.resumable&&A.src&&!A.ended){A.play().then(()=>setPlaying(true)).catch(e=>toast(e.message))}else playAt(S.i)}
 function stopAudio(){S.tok++;A.pause();A.removeAttribute('src');S.resumable=false;S.ac.forEach(a=>a.abort());S.ac.clear();S.cache.forEach(v=>v.then(u=>u&&URL.revokeObjectURL(u),()=>{}));S.cache.clear();cancelCd();S.pf=false;setPlaying(false)}
 A.onended=()=>S.i+1<S.chunks.length?playAt(S.i+1):chapterEnd();
@@ -140,9 +146,31 @@ addEventListener('keydown',e=>{if(e.target.matches('input,select,textarea'))retu
 if('serviceWorker'in navigator)addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));
 applyS();addEventListener('DOMContentLoaded',()=>{});hero.init();route();
 
+function updateModelUI(h){
+ const st=$('#s-model-status'),btn=$('#s-dl-model');
+ if(!st)return;
+ if(h.tts_downloading){st.textContent='Đang tải model… '+ (h.tts_download_msg||'');if(btn){btn.disabled=true;btn.classList.add('busy');btn.textContent='Đang tải…'}}
+ else if(h.tts_ready){st.textContent='Model giọng đọc: sẵn sàng'+(h.tts_cached?' (đã cache/bundle)':'');if(btn){btn.disabled=false;btn.classList.remove('busy');btn.textContent='Tải lại gói giọng đọc'}}
+ else if(h.tts_error){st.textContent='Model lỗi: '+h.tts_error;if(btn){btn.disabled=false;btn.classList.remove('busy');btn.textContent='Tải gói giọng đọc'}}
+ else{st.textContent='Model chưa sẵn sàng — bấm tải nếu nghe lỗi';if(btn){btn.disabled=false;btn.classList.remove('busy');btn.textContent='Tải gói giọng đọc'}}
+}
 async function pollTTS(){try{const h=await(await api('/api/health')).json(),c=$('#tts-chip');S.local=h.tts!=='cloud';
- if(h.tts_error){S.ready=true;c.hidden=false;c.className='chip';c.textContent='Giọng đọc lỗi';toast('VieNeu: '+h.tts_error);return}
+ updateModelUI(h);
+ if(h.tts_downloading){S.ready=false;c.hidden=false;c.className='chip';c.textContent='Đang tải model…';setTimeout(pollTTS,2000);paint();return}
+ if(h.tts_error){S.ready=false;c.hidden=false;c.className='chip';c.textContent='Giọng đọc lỗi — mở Cài đặt để tải model';toast('VieNeu: '+h.tts_error);paint();return}
  S.ready=h.tts_ready;c.hidden=false;
  if(!h.tts_ready){c.className='chip';c.textContent='Đang nạp giọng đọc…';setTimeout(pollTTS,1500)}
  else{c.className='chip ok';c.textContent='Giọng sẵn sàng';setTimeout(()=>c.hidden=true,2500)}paint()}catch{setTimeout(pollTTS,3000)}}
 pollTTS();
+
+$('#s-dl-model')?.addEventListener('click',async()=>{
+ const btn=$('#s-dl-model');btn.disabled=true;btn.classList.add('busy');btn.textContent='Đang tải…';
+ $('#s-model-status').textContent='Đang tải model giọng đọc (có thể vài phút, cần mạng)…';
+ try{
+  const r=await api('/api/tts/download-model',{method:'POST'});
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok)throw new Error(j.detail||j.message||r.statusText);
+  toast('Đã tải model xong');
+  pollTTS();
+ }catch(e){toast('Tải model thất bại: '+e.message);$('#s-model-status').textContent='Lỗi: '+e.message;btn.disabled=false;btn.classList.remove('busy');btn.textContent='Tải gói giọng đọc'}
+});

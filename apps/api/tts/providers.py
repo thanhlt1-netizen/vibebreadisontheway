@@ -78,78 +78,169 @@ class Provider:
         return data, False
 
 class SDKProvider(Provider):
-    """VieNeu chạy ngay trong tiến trình (ONNX CPU / CUDA) — không cần server, không tốn token."""
-    fmt = "wav"; cloud = False
+    """VieNeu in-process (ONNX). No server, no cloud tokens."""
+    fmt = "wav"
+    cloud = False
+
     def __init__(self):
-        self.tts = None; self.err = None; self.ms_per_char = None
-        self._load = threading.Lock(); self.lock = asyncio.Lock()
+        self.tts = None
+        self.err = None
+        self.ms_per_char = None
+        self._load = threading.Lock()
+        self.lock = asyncio.Lock()
+        self.downloading = False
+        self.download_msg = ""
 
     @property
-    def ready(self): return self.tts is not None
+    def ready(self):
+        return self.tts is not None
+
+    def status(self) -> dict:
+        hf = os.environ.get("HF_HOME", "")
+        bundled = bool(hf and os.path.isdir(hf) and any(
+            p.endswith((".onnx", ".bin", ".safetensors", ".json"))
+            for r, _, files in os.walk(hf) for p in files
+        )) if hf and os.path.isdir(hf) else False
+        return {
+            "ready": self.ready,
+            "error": self.err,
+            "downloading": self.downloading,
+            "download_msg": self.download_msg,
+            "hf_home": hf,
+            "bundled_or_cached": bundled,
+            "ms_per_char": self.ms_per_char,
+        }
 
     def _ensure(self):
         with self._load:
             if self.tts is None:
                 from vieneu import Vieneu
                 kw = {}
-                if config.SDK_MODE: kw["mode"] = config.SDK_MODE
-                if config.SDK_PRECISION: kw["precision"] = config.SDK_PRECISION
+                if config.SDK_MODE:
+                    kw["mode"] = config.SDK_MODE
+                if config.SDK_PRECISION:
+                    kw["precision"] = config.SDK_PRECISION
+                # Allow retry from network if offline flag was set from a bad bundle path
                 try:
-                    tts = Vieneu(**kw)           # lần đầu tải model từ Hugging Face (~vài trăm MB)
+                    tts = Vieneu(**kw)
                 except Exception:
-                    if os.environ.pop("HF_HUB_OFFLINE", None) is None: raise
-                    tts = Vieneu(**kw)           # cache đóng gói không dùng được → tải từ mạng
-                try: tts.infer("Xin chào các bạn.", voice=config.DEFAULT_VOICE)   # chạy thử 1 lần để làm nóng
-                except Exception: pass
+                    if os.environ.pop("HF_HUB_OFFLINE", None) is None:
+                        raise
+                    tts = Vieneu(**kw)
+                try:
+                    tts.infer("Xin chao cac ban.", voice=config.DEFAULT_VOICE)
+                except Exception:
+                    pass
                 self.tts = tts
+                self.err = None
         return self.tts
 
     def preload_sync(self):
-        try: self._ensure()
-        except Exception as e: self.err = f"{e.__class__.__name__}: {e}"
+        try:
+            self._ensure()
+        except Exception as e:
+            self.err = f"{e.__class__.__name__}: {e}"
+
+    def download_model_sync(self):
+        """Manual / first-run model fetch into HF_HOME (writable)."""
+        if self.downloading:
+            return False, "Dang tai model..."
+        self.downloading = True
+        self.download_msg = "Dang tai model giọng đọc (có thể vài phút)..."
+        self.err = None
+        try:
+            # Force online
+            os.environ.pop("HF_HUB_OFFLINE", None)
+            # Reset instance so _ensure reloads
+            with self._load:
+                self.tts = None
+            self._ensure()
+            self.download_msg = "Da tai xong model"
+            return True, "OK"
+        except Exception as e:
+            self.err = f"{e.__class__.__name__}: {e}"
+            self.download_msg = f"Loi: {self.err}"
+            return False, self.err
+        finally:
+            self.downloading = False
 
     async def warmup(self):
         await asyncio.to_thread(self.preload_sync)
 
+    async def download_model(self):
+        return await asyncio.to_thread(self.download_model_sync)
+
     def _infer(self, text, voice):
         tts = self._ensure()
         audio = tts.infer(text, voice=voice)
-        fd, path = tempfile.mkstemp(suffix=".wav"); os.close(fd)
+        fd, path = tempfile.mkstemp(suffix=".wav")
+        os.close(fd)
         try:
             tts.save(audio, path)
-            return open(path, "rb").read()
+            with open(path, "rb") as f:
+                return f.read()
         finally:
-            os.remove(path)
+            try:
+                os.remove(path)
+            except OSError:
+                pass
 
     async def synth(self, text, voice, alive=None):
-        async with self.lock:                    # model dùng chung: xử lý lần lượt từng đoạn
-            if alive and not await alive():      # người nghe đã nhảy đoạn khác → bỏ, nhường chỗ cho đoạn cần
-                raise TTSError(499, "Yêu cầu đã huỷ")
+        async with self.lock:
+            if alive and not await alive():
+                raise TTSError(499, "Yeu cau da huy")
             t0 = time.perf_counter()
             try:
                 data = await asyncio.to_thread(self._infer, text, voice)
                 ms = (time.perf_counter() - t0) * 1000 / max(len(text), 1)
-                self.ms_per_char = ms if self.ms_per_char is None else self.ms_per_char * .7 + ms * .3
+                self.ms_per_char = ms if self.ms_per_char is None else self.ms_per_char * 0.7 + ms * 0.3
                 return data
-            except ImportError: raise TTSError(500, "Chưa cài VieNeu: pip install vieneu")
-            except Exception as e: raise TTSError(502, f"VieNeu (local) lỗi: {e}")
+            except ImportError:
+                raise TTSError(500, "Chua cai VieNeu: pip install vieneu")
+            except Exception as e:
+                msg = f"{e.__class__.__name__}: {e}"
+                self.err = msg
+                raise TTSError(500, f"VieNeu (local) loi: {e}")
+
+    async def cached(self, text, voice, alive=None):
+        os.makedirs(config.CACHE_DIR, exist_ok=True)
+        path = os.path.join(config.CACHE_DIR, self.key(text, voice) + "." + self.fmt)
+        if os.path.exists(path):
+            with open(path, "rb") as f:
+                return f.read(), True
+        data = await self.synth(text, voice, alive)
+        tmp = path + ".tmp"
+        with open(tmp, "wb") as f:
+            f.write(data)
+        os.replace(tmp, path)
+        return data, False
 
     async def voices(self):
-        tts = await asyncio.to_thread(self._ensure)
-        for name in ("list_preset_voices", "list_voices"):
+        try:
+            tts = await asyncio.to_thread(self._ensure)
+        except Exception as e:
+            self.err = f"{e.__class__.__name__}: {e}"
+            return [{"id": config.DEFAULT_VOICE, "name": config.DEFAULT_VOICE}]
+        for name in ("voices", "list_voices"):
             f = getattr(tts, name, None)
             if callable(f):
                 try:
                     out = []
                     for v in f():
-                        if isinstance(v, dict): out.append({"id": str(v.get("id") or v.get("name")), "name": str(v.get("name") or v.get("id"))})
-                        elif isinstance(v, (tuple, list)): out.append({"id": str(v[-1]), "name": str(v[0])})
-                        else: out.append({"id": str(v), "name": str(v)})
-                    if out: return out
-                except Exception: pass
+                        if isinstance(v, dict):
+                            out.append({"id": str(v.get("id") or v.get("name")), "name": str(v.get("name") or v.get("id"))})
+                        elif isinstance(v, (tuple, list)):
+                            out.append({"id": str(v[-1]), "name": str(v[0])})
+                        else:
+                            out.append({"id": str(v), "name": str(v)})
+                    if out:
+                        return out
+                except Exception:
+                    pass
         return [{"id": config.DEFAULT_VOICE, "name": config.DEFAULT_VOICE}]
 
     async def stream(self, text, voice):
-        raise TTSError(501, "Chế độ SDK chưa hỗ trợ streaming; dùng /api/tts")
+        raise TTSError(501, "Che do SDK chua ho tro streaming; dung /api/tts")
+
 
 provider = SDKProvider() if config.TTS_PROVIDER == "sdk" else Provider()

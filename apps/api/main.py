@@ -27,9 +27,40 @@ async def _warm():
 @app.get("/api/health")
 async def health():
     sdk = config.TTS_PROVIDER == "sdk"
-    return {"ok": True, "tts_ready": provider.ready if sdk else True, "tts_error": getattr(provider, "err", None), "ms_per_char": getattr(provider, "ms_per_char", None),
-            "data_dir": config.DATA_DIR, "tts": config.TTS_PROVIDER, "tts_key": bool(config.API_KEY) or config.TTS_PROVIDER != "cloud",
-            "translate_key": bool(config.ANTHROPIC_KEY)}
+    st = provider.status() if sdk and hasattr(provider, "status") else {}
+    return {
+        "ok": True,
+        "tts_ready": provider.ready if sdk else True,
+        "tts_error": getattr(provider, "err", None),
+        "tts_downloading": st.get("downloading", False),
+        "tts_download_msg": st.get("download_msg", ""),
+        "tts_cached": st.get("bundled_or_cached", False),
+        "ms_per_char": getattr(provider, "ms_per_char", None),
+        "data_dir": config.DATA_DIR,
+        "tts": config.TTS_PROVIDER,
+        "tts_key": bool(config.API_KEY) or config.TTS_PROVIDER != "cloud",
+        "translate_key": bool(config.ANTHROPIC_KEY),
+    }
+
+@app.post("/api/tts/download-model")
+async def download_model():
+    """Tai / cai model VieNeu thu cong khi ban cai khong bundle model."""
+    if config.TTS_PROVIDER != "sdk":
+        return {"ok": True, "message": "Chi can thiet o che do sdk"}
+    if not hasattr(provider, "download_model"):
+        raise HTTPException(400, "Provider khong ho tro tai model")
+    if getattr(provider, "downloading", False):
+        return {"ok": False, "message": "Dang tai model, vui long cho"}
+    ok, msg = await provider.download_model()
+    if not ok:
+        raise HTTPException(500, msg)
+    return {"ok": True, "message": msg}
+
+@app.get("/api/tts/status")
+async def tts_status():
+    if config.TTS_PROVIDER != "sdk" or not hasattr(provider, "status"):
+        return {"ready": True, "provider": config.TTS_PROVIDER}
+    return provider.status()
 
 @app.get("/api/resolve")
 async def resolve(url: str):

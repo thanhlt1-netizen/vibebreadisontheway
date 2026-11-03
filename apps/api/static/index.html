@@ -68,6 +68,11 @@
     <label>Cỡ chữ <output id="o-fs"></output><input id="s-fs" type="range" min="16" max="30" step="1"></label>
     <label>Giãn dòng <output id="o-lh"></output><input id="s-lh" type="range" min="1.4" max="2.4" step=".1"></label>
     <label>Giọng đọc<select id="s-voice"><option value="">Mặc định</option></select></label>
+    <div class="model-box">
+      <p class="hint" id="s-model-status">Model giọng đọc: đang kiểm tra…</p>
+      <button type="button" id="s-dl-model" class="btn-dl">Tải gói giọng đọc</button>
+      <p class="hint">Dùng khi cài bản không kèm model, hoặc model bị lỗi. Cần mạng, có thể vài phút (~vài trăm MB).</p>
+    </div>
     <label class="row">Tải trước chương sau<input id="s-pf" type="checkbox"></label>
     <label>API key Anthropic (để dịch)<input id="s-key" type="password" placeholder="sk-ant-… (lưu cục bộ trên máy)" autocomplete="off"></label>
     <p class="hint" id="s-info"></p>
