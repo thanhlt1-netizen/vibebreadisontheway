@@ -1,4 +1,4 @@
-\xef\xbb\xbf#ifndef AppVersion
+#ifndef AppVersion
   #define AppVersion "0.1.0"
 #endif
 [Setup]
