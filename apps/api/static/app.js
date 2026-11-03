@@ -52,18 +52,36 @@ function paint(){const n=S.chunks.length,d=$('#dock');d.hidden=!S.ch;$('#d-title
   ring(n?(S.i+(A.duration&&S.playing?A.currentTime/A.duration:0))/n:0)}}
 function setPlaying(b){S.playing=b;morphTo(b?1:0);$('#dock').classList.toggle('playing',b);if('mediaSession'in navigator)navigator.mediaSession.playbackState=b?'playing':'paused';paint()}
 const WIN=()=>S.local?3:1;
+async function ttsPost(text,signal){
+ const r=await api('/api/tts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,voice:settings.voice||undefined}),signal});
+ if(!r.ok){let d='';try{const j=await r.json();d=typeof j.detail==='string'?j.detail:JSON.stringify(j.detail||j)}catch{try{d=await r.text()}catch{}}const err=new Error(d||('TTS HTTP '+r.status));err.status=r.status;throw err}
+ return r.blob()
+}
 function fetchChunk(i){if(i<0||i>=S.chunks.length)return Promise.resolve(null);
- if(!S.cache.has(i)){const ac=new AbortController(),p=api('/api/tts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:S.chunks[i],voice:settings.voice||undefined}),signal:ac.signal}).then(async r=>{if(!r.ok){let d='';try{d=await r.text()}catch{};throw new Error(d||('TTS HTTP '+r.status))}return r.blob()}).then(b=>URL.createObjectURL(b));p.catch(()=>{S.cache.delete(i);S.ac.delete(i)});S.cache.set(i,p);S.ac.set(i,ac)}return S.cache.get(i)}
+ if(!S.cache.has(i)){const ac=new AbortController(),p=(async()=>{
+  let last;
+  for(let a=0;a<8;a++){
+   try{const b=await ttsPost(S.chunks[i],ac.signal);return URL.createObjectURL(b)}
+   catch(e){last=e;if(e.name==='AbortError')throw e;
+    const m=String(e.message||'');
+    if(e.status===503||/dang nap|dang tai|chua san sang|503/i.test(m)){toast('Đang nạp model… thử lại sau vài giây');await new Promise(r=>setTimeout(r,2500));continue}
+    throw e}
+  }
+  throw last||new Error('TTS timeout khi nạp model');
+ })();p.catch(()=>{S.cache.delete(i);S.ac.delete(i)});S.cache.set(i,p);S.ac.set(i,ac)}return S.cache.get(i)}
 async function playAt(i){if(!S.chunks.length)return;cancelCd();const tok=++S.tok;S.i=Math.max(0,Math.min(i,S.chunks.length-1));
  for(const[k,v]of[...S.cache]){if(k<S.i-1){v.then(u=>u&&URL.revokeObjectURL(u),()=>{});S.cache.delete(k);S.ac.delete(k)}else if(k>S.i+WIN()){S.ac.get(k)?.abort();S.cache.delete(k);S.ac.delete(k)}}
  setPlaying(true);markActive();saveProgress();
  try{const src=await fetchChunk(S.i);if(tok!==S.tok)return;A.src=src;A.playbackRate=settings.speed;await A.play();if(tok!==S.tok)return;S.resumable=true;for(let k=1;k<=WIN();k++)fetchChunk(S.i+k);maybePrefetch()}
  catch(e){if(tok!==S.tok)return;
   if(e.name==='NotAllowedError'){setPlaying(false);toast('Nhấn ▶ để tiếp tục nghe');return}
-  // Skip broken segment and continue if more remain
   const msg=e.message||String(e);
+  if(/os error 2|file specified|thieu file|model loi|chua cai|chua san sang|VieNeu/i.test(msg)){
+   setPlaying(false);S.cache.delete(S.i);
+   toast(msg.slice(0,160)+' — mở Cài đặt → Tải gói giọng đọc');
+   try{openSheet()}catch{};return}
   if(S.i+1<S.chunks.length){toast('Đoạn '+(S.i+1)+' lỗi, bỏ qua: '+msg.slice(0,80));S.cache.delete(S.i);playAt(S.i+1)}
-  else{setPlaying(false);toast(msg.includes('VieNeu')||msg.includes('model')||msg.includes('file')?msg+' — mở Cài đặt → Tải gói giọng đọc':msg)}
+  else{setPlaying(false);toast(msg)}
  }}
 function toggle(){if(S.cd){cancelCd();return}if(S.playing){A.pause();setPlaying(false)}else if(S.resumable&&A.src&&!A.ended){A.play().then(()=>setPlaying(true)).catch(e=>toast(e.message))}else playAt(S.i)}
 function stopAudio(){S.tok++;A.pause();A.removeAttribute('src');S.resumable=false;S.ac.forEach(a=>a.abort());S.ac.clear();S.cache.forEach(v=>v.then(u=>u&&URL.revokeObjectURL(u),()=>{}));S.cache.clear();cancelCd();S.pf=false;setPlaying(false)}
