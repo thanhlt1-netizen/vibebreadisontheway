@@ -1,10 +1,19 @@
-"""Đóng gói app: python build_desktop.py → dist/VibeRead (thư mục, khởi động nhanh hơn 1 file)."""
+"""Build desktop app: python build_desktop.py -> dist/VibeRead"""
 import os
 import sys
-import PyInstaller.__main__ as pi
+
+# Force UTF-8 on Windows runners (default cp1252 breaks Vietnamese prints)
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 os.makedirs("assets", exist_ok=True)
 os.makedirs("dist", exist_ok=True)
+
+import PyInstaller.__main__ as pi
 
 sep = ";" if os.name == "nt" else ":"
 args = [
@@ -27,10 +36,10 @@ args = [
 if os.path.exists("assets/icon.ico"):
     args += ["--icon", "assets/icon.ico"]
 if os.path.isdir("hf_cache"):
-    args += ["--add-data", f"hf_cache{sep}hf_cache"]  # model đóng gói sẵn
-    print("Đóng gói kèm model hf_cache")
+    args += ["--add-data", f"hf_cache{sep}hf_cache"]
+    print("Bundling hf_cache model")
 else:
-    print("Không có hf_cache — bản cài sẽ tải model lần đầu khi chạy")
+    print("No hf_cache - first-run model download")
 
 print("PyInstaller args:", " ".join(args))
 try:
@@ -38,8 +47,8 @@ try:
 except SystemExit as e:
     if e.code not in (0, None):
         raise
-print("PyInstaller xong. Kiểm tra dist/VibeRead...")
+
 if not os.path.isdir("dist/VibeRead"):
-    print("LỖI: không tìm thấy dist/VibeRead sau khi build", file=sys.stderr)
+    print("ERROR: dist/VibeRead not found after PyInstaller", file=sys.stderr)
     sys.exit(1)
-print("OK — dist/VibeRead đã sẵn sàng")
+print("OK - dist/VibeRead ready")
