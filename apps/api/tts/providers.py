@@ -114,13 +114,14 @@ class SDKProvider(Provider):
     def _ensure(self):
         with self._load:
             if self.tts is None:
+                os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS", "1")
+                os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
                 from vieneu import Vieneu
                 kw = {}
                 if config.SDK_MODE:
                     kw["mode"] = config.SDK_MODE
                 if config.SDK_PRECISION:
                     kw["precision"] = config.SDK_PRECISION
-                # Allow retry from network if offline flag was set from a bad bundle path
                 try:
                     tts = Vieneu(**kw)
                 except Exception:
@@ -149,9 +150,10 @@ class SDKProvider(Provider):
         self.download_msg = "Dang tai model giọng đọc (có thể vài phút)..."
         self.err = None
         try:
-            # Force online
+            # Force online + no HF symlinks (ORT external-data safety on Windows)
             os.environ.pop("HF_HUB_OFFLINE", None)
-            # Reset instance so _ensure reloads
+            os.environ["HF_HUB_DISABLE_SYMLINKS"] = "1"
+            os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
             with self._load:
                 self.tts = None
             self._ensure()
