@@ -6,21 +6,20 @@ os.environ.setdefault("TTS_PROVIDER", "sdk")
 os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS", "1")
 os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 os.environ.setdefault("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "--autoplay-policy=no-user-gesture-required")
+# Never force offline — incomplete bundles must be allowed to re-download
+os.environ.pop("HF_HUB_OFFLINE", None)
 
 BASE = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
 
-# Prefer bundled model; otherwise use writable APPDATA cache so first-run / manual download works
+# Writable model cache always under APPDATA (MEIPASS is read-only when frozen)
+_appdata = os.environ.get("APPDATA") or os.path.expanduser("~")
+_hf = os.path.join(_appdata, "VibeRead", "hf_cache")
+os.makedirs(_hf, exist_ok=True)
+os.environ["HF_HOME"] = _hf
+os.environ["HUGGINGFACE_HUB_CACHE"] = os.path.join(_hf, "hub")
+
 if (BASE / "hf_cache").is_dir():
-    os.environ.setdefault("HF_HOME", str(BASE / "hf_cache"))
-    os.environ.setdefault("HF_HUB_OFFLINE", "1")
-else:
-    # Must be set BEFORE importing config/vieneu so downloads go to a writable place
-    _appdata = os.environ.get("APPDATA") or os.path.expanduser("~")
-    _hf = os.path.join(_appdata, "VibeRead", "hf_cache")
-    os.makedirs(_hf, exist_ok=True)
-    os.environ.setdefault("HF_HOME", _hf)
-    # Allow network download when model not bundled
-    os.environ.pop("HF_HUB_OFFLINE", None)
+    os.environ["VIBEREAD_BUNDLE_HF"] = str(BASE / "hf_cache")
 
 os.chdir(BASE)
 
@@ -57,6 +56,13 @@ def main():
     import uvicorn, webview
     from main import app
     from tts.providers import provider
+    try:
+        from tts.model_store import seed_from_bundle
+        b = os.environ.get("VIBEREAD_BUNDLE_HF")
+        if b:
+            seed_from_bundle(Path(b))
+    except Exception as e:
+        print(f"seed_from_bundle: {e}")
     if config.TTS_PROVIDER == "sdk":
         threading.Thread(target=provider.preload_sync, daemon=True).start()
     port = pick_port()
