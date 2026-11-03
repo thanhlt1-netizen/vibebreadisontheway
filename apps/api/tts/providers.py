@@ -127,12 +127,20 @@ class SDKProvider(Provider):
         lite.OnnxV3LiteEngine.__init__ = _patched_init
         try:
             from vieneu import Vieneu
-            kw = {"backend": "onnx", "onnx_dir": onnx_path}
+            prec = config.SDK_PRECISION or "int8"
+            kw = {"backend": "onnx", "onnx_dir": onnx_path, "precision": prec}
             if config.SDK_MODE:
                 kw["mode"] = config.SDK_MODE
-            if config.SDK_PRECISION:
-                kw["precision"] = config.SDK_PRECISION
-            return Vieneu(**kw)
+            if getattr(config, "SDK_THREADS", 0):
+                kw["threads"] = config.SDK_THREADS
+            try:
+                return Vieneu(**kw)
+            except Exception:
+                # int8 graphs missing or CPU without VNNI → fp32
+                if prec != "fp32":
+                    kw["precision"] = "fp32"
+                    return Vieneu(**kw)
+                raise
         finally:
             lite.OnnxV3LiteEngine.__init__ = _orig_init
 
@@ -143,7 +151,7 @@ class SDKProvider(Provider):
             self.downloading = True
             self.download_msg = "Dang nap model..."
             try:
-                from tts.model_store import ensure_models, seed_from_bundle, diagnose
+                from tts.model_store import ensure_models, seed_from_bundle, diagnose, prefer_onnx_dir
                 from pathlib import Path
 
                 for cand in (
@@ -161,6 +169,9 @@ class SDKProvider(Provider):
                     self.download_msg = s
 
                 onnx_path, codec_path = ensure_models(progress=prog)
+                # Prefer int8 flat dir when available (faster CPU)
+                want8 = (config.SDK_PRECISION or "int8") == "int8"
+                onnx_path = prefer_onnx_dir(want_int8=want8) or onnx_path
                 diag = diagnose()
                 if diag["onnx_missing"] or diag["codec_missing"]:
                     raise FileNotFoundError(
@@ -245,23 +256,36 @@ class SDKProvider(Provider):
     async def download_model(self):
         return await asyncio.to_thread(self.download_model_sync)
 
-    def _infer_once(self, tts, text, voice):
-        """Single attempt: synthesize + write wav under DATA_DIR (not system temp)."""
-        audio = tts.infer(text, voice=voice)
-        out_dir = os.path.join(config.DATA_DIR, "audio", "tmp")
-        os.makedirs(out_dir, exist_ok=True)
-        path = os.path.join(out_dir, f"{hashlib.sha1((text[:80]+voice).encode()).hexdigest()[:16]}_{int(time.time()*1000)%100000}.wav")
+    def _audio_to_wav_bytes(self, tts, audio) -> bytes:
+        """In-memory WAV — avoids disk I/O on every segment."""
+        import io
+        import numpy as np
         try:
-            tts.save(audio, path)
-            with open(path, "rb") as f:
-                return f.read()
-        finally:
+            import soundfile as sf
+            buf = io.BytesIO()
+            sf.write(buf, np.asarray(audio), int(getattr(tts, "sample_rate", 48000) or 48000), format="WAV")
+            return buf.getvalue()
+        except Exception:
+            # Fallback: temp under DATA_DIR
+            out_dir = os.path.join(config.DATA_DIR, "audio", "tmp")
+            os.makedirs(out_dir, exist_ok=True)
+            path = os.path.join(out_dir, f"t{os.getpid()}_{time.time_ns()}.wav")
             try:
-                os.remove(path)
-            except OSError:
-                pass
+                tts.save(audio, path)
+                with open(path, "rb") as f:
+                    return f.read()
+            finally:
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+
+    def _infer_once(self, tts, text, voice):
+        audio = tts.infer(text, voice=voice)
+        return self._audio_to_wav_bytes(tts, audio)
 
     def _infer(self, text, voice):
+        # Caller already holds asyncio lock; only serialize vs preload thread
         tts = self._ensure()
         voice = voice or config.DEFAULT_VOICE
         text = (text or "").strip()
@@ -270,20 +294,18 @@ class SDKProvider(Provider):
         last = None
         for attempt in range(3):
             try:
-                with self._load:  # serialize ONNX with preload/download
+                with self._load:
                     return self._infer_once(tts, text, voice)
             except Exception as e:
                 last = e
                 msg = str(e).lower()
-                # Intermittent Windows "os error 2" under load → retry
                 if attempt < 2 and (
                     "os error 2" in msg
                     or "cannot find the file" in msg
                     or "filenotfound" in e.__class__.__name__.lower()
                 ):
-                    time.sleep(0.4 * (attempt + 1))
+                    time.sleep(0.25 * (attempt + 1))
                     continue
-                # wrong voice name
                 if voice not in ("Hải Đăng", "Hai Dang") and attempt == 0:
                     try:
                         with self._load:

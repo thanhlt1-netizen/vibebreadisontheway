@@ -19,6 +19,7 @@ import config
 V3_REPO = "pnnbao-ump/VieNeu-TTS-v3-Turbo"
 CODEC_REPO = "OpenMOSS-Team/MOSS-Audio-Tokenizer-Nano-ONNX"
 ONNX_SUBFOLDER = "onnx_update"  # fp32
+ONNX_SUBFOLDER_INT8 = "onnx_int8"
 
 GRAPH_FILES = [
     "vieneu_prefill.onnx",
@@ -105,6 +106,15 @@ def _download_one(repo: str, filename: str, dest: Path, subfolder: str | None) -
     shutil.copy2(src, dest)
 
 
+
+
+def prefer_onnx_dir(want_int8: bool = True) -> str:
+    """Return flat onnx dir; prefer int8 graphs when present and requested."""
+    od8 = models_root() / "onnx_int8"
+    if want_int8 and _ready(od8, GRAPH_FILES):
+        return str(od8)
+    return str(onnx_dir())
+
 def ensure_models(progress=None) -> tuple[str, str]:
     """
     Ensure flat onnx + codec dirs exist. Returns (onnx_dir, codec_dir).
@@ -155,6 +165,20 @@ def ensure_models(progress=None) -> tuple[str, str]:
 
     (od / MARKER).write_text("ok", encoding="utf-8")
     (cd / MARKER).write_text("ok", encoding="utf-8")
+    # Best-effort int8 graphs for faster CPU inference
+    try:
+        od8 = models_root() / "onnx_int8"
+        od8.mkdir(parents=True, exist_ok=True)
+        if not _ready(od8, GRAPH_FILES):
+            for fn in GRAPH_FILES:
+                if not (od8 / fn).is_file():
+                    msg(f"Tai int8: {fn}")
+                    _download_one(V3_REPO, fn, od8 / fn, ONNX_SUBFOLDER_INT8)
+            if not missing_files(od8, GRAPH_FILES):
+                (od8 / MARKER).write_text("ok", encoding="utf-8")
+                msg("int8 ready")
+    except Exception as e:
+        msg(f"int8 skip: {e}")
     msg("Hoan tat tai model")
     return str(od), str(cd)
 

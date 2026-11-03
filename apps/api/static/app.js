@@ -51,7 +51,7 @@ function paint(){const n=S.chunks.length,d=$('#dock');d.hidden=!S.ch;$('#d-title
  else{d.classList.remove('cd');$('#stay').hidden=true;$('#d-sub').textContent=S.playing&&!S.ready?'Đang nạp giọng đọc… (chỉ lần đầu)':n?`Đoạn ${S.i+1}/${n}${S.playing?'':' · tạm dừng'}`:'Đang tải…';
   ring(n?(S.i+(A.duration&&S.playing?A.currentTime/A.duration:0))/n:0)}}
 function setPlaying(b){S.playing=b;morphTo(b?1:0);$('#dock').classList.toggle('playing',b);if('mediaSession'in navigator)navigator.mediaSession.playbackState=b?'playing':'paused';paint()}
-const WIN=()=>S.local?1:1;
+const WIN=()=>S.local?2:1;
 async function ttsPost(text,signal){
  const r=await api('/api/tts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,voice:settings.voice||undefined}),signal});
  if(!r.ok){let d='';try{const j=await r.json();d=typeof j.detail==='string'?j.detail:JSON.stringify(j.detail||j)}catch{try{d=await r.text()}catch{}}const err=new Error(d||('TTS HTTP '+r.status));err.status=r.status;throw err}
@@ -64,8 +64,8 @@ function fetchChunk(i){if(i<0||i>=S.chunks.length)return Promise.resolve(null);
    try{const b=await ttsPost(S.chunks[i],ac.signal);return URL.createObjectURL(b)}
    catch(e){last=e;if(e.name==='AbortError')throw e;
     const m=String(e.message||'');
-    if(e.status===503||/dang nap|dang tai|chua san sang|503/i.test(m)){toast('Đang nạp model… thử lại sau vài giây');await new Promise(r=>setTimeout(r,2500));continue}
-    if(/os error 2|cannot find the file/i.test(m) && a<4){await new Promise(r=>setTimeout(r,500*(a+1));continue}
+    if(e.status===503||/dang nap|dang tai|chua san sang|503/i.test(m)){if(a===0)toast('Đang nạp model…');await new Promise(r=>setTimeout(r,1200));continue}
+    if(/os error 2|cannot find the file/i.test(m) && a<3){await new Promise(r=>setTimeout(r,300*(a+1));continue}
     throw e}
   }
   throw last||new Error('TTS timeout khi nạp model');
@@ -127,7 +127,7 @@ async function openChapter(url,o={}){stopAudio();S.novel=o.novel||null;S.list=nu
    if(wantTr){translateChapter(!!(o.autoplay||settings.autoTranslate));return}
    if(o.autoplay){setPlaying(false)}return}
   applyText(ch.vi||ch);const pr=await idb.get('progress',url);S.i=pr&&pr.chunk<S.chunks.length-1?pr.chunk:0;
-  renderText();renderBanner();paint();setMedia();if(o.autoplay)playAt(0);else if(S.local)fetchChunk(S.i)}
+  renderText();renderBanner();paint();setMedia();if(o.autoplay)playAt(0);else if(S.local){fetchChunk(S.i);fetchChunk(S.i+1)}}
  catch(e){if(S.ch?.url!==url)return;S.ch=null;paint();$('#state').innerHTML=`<div class="err"><strong>Không tải được chương</strong><p>${esc(e.message)}</p><button class="pill hot" id="retry">Thử lại</button></div>`;$('#retry').onclick=()=>openChapter(url,o)}}
 
 /* ---------- Novel & Home ---------- */

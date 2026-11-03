@@ -18,8 +18,9 @@ def _data_dir():
 DATA_DIR = _data_dir()
 CACHE_DIR = env("AUDIO_CACHE_DIR", os.path.join(DATA_DIR, "audio"))
 SDK_MODE = env("VIENEU_MODE")             # để trống = v3 Turbo; "v3nano" cho máy yếu
-SDK_PRECISION = env("VIENEU_PRECISION")   # "int8" nhanh hơn ~1.6x nếu CPU có VNNI
-MIN_CHARS = 50 if TTS_PROVIDER == "cloud" else 20          # Cloud API: tối thiểu 50 ký tự mỗi request
+SDK_PRECISION = env("VIENEU_PRECISION", "int8" if TTS_PROVIDER == "sdk" else "")
+SDK_THREADS = int(env("VIENEU_THREADS", "0"))  # 0 = auto
+MIN_CHARS = 50 if TTS_PROVIDER == "cloud" else 16
 ANTHROPIC_KEY = env("ANTHROPIC_API_KEY")
 TRANSLATE_MODEL = env("TRANSLATE_MODEL", "claude-sonnet-4-5")
 # OpenAI-compatible (DeepSeek mặc định — mạnh dịch tiểu thuyết CN/JP theo cộng đồng open-source)

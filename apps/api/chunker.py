@@ -1,8 +1,8 @@
 import re
 from config import MIN_CHARS
 
-def chunk_text(text: str, max_len: int = 350, min_len: int = MIN_CHARS, first_max: int = 110) -> list[str]:
-    """Tách theo câu thành đoạn <= max_len; gộp đoạn ngắn để mỗi đoạn >= min_len (giới hạn của Cloud API)."""
+def chunk_text(text: str, max_len: int = 480, min_len: int = MIN_CHARS, first_max: int = 90) -> list[str]:
+    """Tách theo câu. first_max nhỏ → nghe sớm; max_len lớn hơn → ít request TTS hơn."""
     out: list[str] = []
     for para in text.split("\n"):
         para = para.strip()
