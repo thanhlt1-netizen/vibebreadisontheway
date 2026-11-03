@@ -10,8 +10,8 @@ jobs:
     runs-on: windows-latest
     defaults: { run: { working-directory: apps/api } }
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with: { python-version: "3.11", cache: pip }
       - run: pip install -r requirements-desktop.txt pillow
       - run: python make_icon.py
@@ -26,7 +26,7 @@ jobs:
         run: |
           $v = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}".TrimStart("v") } else { "0.1.0" }
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=$v" installer\VibeRead.iss
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with: { name: VibeRead-Setup, path: apps/api/dist-installer/VibeRead-Setup.exe }
       - uses: softprops/action-gh-release@v2
         if: github.ref_type == 'tag'
