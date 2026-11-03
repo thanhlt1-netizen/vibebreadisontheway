@@ -2,32 +2,84 @@ name: Build Windows installer
 on:
   workflow_dispatch:
     inputs:
-      bundle_model: { description: "Đóng gói sẵn model giọng đọc (cài offline, file lớn hơn)", type: boolean, default: true }
-  push: { tags: ["v*"] }
-permissions: { contents: write }
+      bundle_model:
+        description: "Đóng gói sẵn model giọng đọc (cài offline, file lớn hơn, lâu hơn ~10-20 phút)"
+        type: boolean
+        default: true
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-latest
-    defaults: { run: { working-directory: apps/api } }
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: apps/api
     steps:
       - uses: actions/checkout@v5
+
       - uses: actions/setup-python@v6
-        with: { python-version: "3.11", cache: pip }
-      - run: pip install -r requirements-desktop.txt pillow
-      - run: python make_icon.py
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Cài dependencies
+        run: pip install -r requirements-desktop.txt pillow
+
+      - name: Tạo icon
+        run: |
+          python make_icon.py
+          if (-not (Test-Path "assets/icon.ico")) { throw "assets/icon.ico không được tạo" }
+          Get-Item assets/icon.ico | Format-List Name, Length
+
       - name: Tải model để đóng gói sẵn
-        if: ${{ github.event_name != 'workflow_dispatch' || inputs.bundle_model }}
+        if: github.event_name != 'workflow_dispatch' || inputs.bundle_model == true
         run: python prefetch_model.py
-      - run: python build_desktop.py
-      - name: WebView2 bootstrapper
-        run: Invoke-WebRequest "https://go.microsoft.com/fwlink/p/?LinkId=2124703" -OutFile installer/MicrosoftEdgeWebview2Setup.exe
-      - run: choco install innosetup -y --no-progress
-      - name: Tạo bộ cài
+        timeout-minutes: 45
+
+      - name: Đóng gói bằng PyInstaller
+        run: |
+          python build_desktop.py
+          if (-not (Test-Path "dist/VibeRead")) { throw "dist/VibeRead không tồn tại sau PyInstaller" }
+          Get-ChildItem dist/VibeRead | Select-Object -First 15 Name
+
+      - name: Tải WebView2 bootstrapper
+        run: |
+          New-Item -ItemType Directory -Force -Path installer | Out-Null
+          Invoke-WebRequest "https://go.microsoft.com/fwlink/p/?LinkId=2124703" -OutFile installer/MicrosoftEdgeWebview2Setup.exe
+          if (-not (Test-Path "installer/MicrosoftEdgeWebview2Setup.exe")) { throw "Không tải được WebView2 bootstrapper" }
+
+      - name: Cài Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: Kiểm tra file trước khi tạo bộ cài
+        run: |
+          Write-Host "=== Kiểm tra đường dẫn (từ apps/api) ==="
+          @("assets/icon.ico", "dist/VibeRead", "installer/VibeRead.iss", "installer/MicrosoftEdgeWebview2Setup.exe") | ForEach-Object {
+            if (Test-Path $_) { Write-Host "OK  $_" } else { Write-Host "THIẾU  $_"; throw "Thiếu $_" }
+          }
+          Write-Host "=== 3 dòng đầu VibeRead.iss ==="
+          Get-Content installer/VibeRead.iss -TotalCount 5 -Encoding UTF8
+
+      - name: Tạo bộ cài (Inno Setup)
         run: |
           $v = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}".TrimStart("v") } else { "0.1.0" }
+          Write-Host "AppVersion = $v"
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=$v" installer\VibeRead.iss
+          if (-not (Test-Path "dist-installer/VibeRead-Setup.exe")) { throw "Không tạo được dist-installer/VibeRead-Setup.exe" }
+          Get-Item dist-installer/VibeRead-Setup.exe | Format-List Name, Length, LastWriteTime
+
       - uses: actions/upload-artifact@v6
-        with: { name: VibeRead-Setup, path: apps/api/dist-installer/VibeRead-Setup.exe }
+        with:
+          name: VibeRead-Setup
+          path: apps/api/dist-installer/VibeRead-Setup.exe
+          if-no-files-found: error
+
       - uses: softprops/action-gh-release@v2
         if: github.ref_type == 'tag'
-        with: { files: apps/api/dist-installer/VibeRead-Setup.exe }
+        with:
+          files: apps/api/dist-installer/VibeRead-Setup.exe
