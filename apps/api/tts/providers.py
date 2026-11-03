@@ -96,38 +96,68 @@ class SDKProvider(Provider):
         return self.tts is not None
 
     def status(self) -> dict:
-        hf = os.environ.get("HF_HOME", "")
-        bundled = bool(hf and os.path.isdir(hf) and any(
-            p.endswith((".onnx", ".bin", ".safetensors", ".json"))
-            for r, _, files in os.walk(hf) for p in files
-        )) if hf and os.path.isdir(hf) else False
+        from tts.model_store import onnx_dir, _ready, GRAPH_FILES
+        od = onnx_dir()
+        cached = _ready(od, GRAPH_FILES)
         return {
             "ready": self.ready,
             "error": self.err,
             "downloading": self.downloading,
             "download_msg": self.download_msg,
-            "hf_home": hf,
-            "bundled_or_cached": bundled,
+            "hf_home": os.environ.get("HF_HOME", ""),
+            "bundled_or_cached": cached,
+            "onnx_dir": str(od),
             "ms_per_char": self.ms_per_char,
         }
+
+    def _make_tts(self, onnx_path: str, codec_path: str):
+        """Load VieNeu with flat onnx_dir + codec_dir (avoids HF symlink/ORT bug)."""
+        os.environ.pop("HF_HUB_OFFLINE", None)
+        os.environ["HF_HUB_DISABLE_SYMLINKS"] = "1"
+        os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
+
+        import vieneu._v3_turbo_engine.onnx_runtime_lite as lite
+        _orig_init = lite.OnnxV3LiteEngine.__init__
+
+        def _patched_init(self, *args, **kwargs):
+            kwargs["onnx_dir"] = onnx_path
+            kwargs["codec_dir"] = codec_path
+            return _orig_init(self, *args, **kwargs)
+
+        lite.OnnxV3LiteEngine.__init__ = _patched_init
+        try:
+            from vieneu import Vieneu
+            kw = {"backend": "onnx", "onnx_dir": onnx_path}
+            if config.SDK_MODE:
+                kw["mode"] = config.SDK_MODE
+            if config.SDK_PRECISION:
+                kw["precision"] = config.SDK_PRECISION
+            return Vieneu(**kw)
+        finally:
+            lite.OnnxV3LiteEngine.__init__ = _orig_init
 
     def _ensure(self):
         with self._load:
             if self.tts is None:
-                os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS", "1")
-                os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
-                from vieneu import Vieneu
-                kw = {}
-                if config.SDK_MODE:
-                    kw["mode"] = config.SDK_MODE
-                if config.SDK_PRECISION:
-                    kw["precision"] = config.SDK_PRECISION
-                try:
-                    tts = Vieneu(**kw)
-                except Exception:
-                    if os.environ.pop("HF_HUB_OFFLINE", None) is None:
-                        raise
-                    tts = Vieneu(**kw)
+                from tts.model_store import ensure_models, seed_from_bundle
+                from pathlib import Path
+
+                # Prefer any installer-shipped cache if present
+                for cand in (
+                    Path(os.environ.get("HF_HOME", "")),
+                    Path(getattr(__import__("sys"), "_MEIPASS", ".")) / "hf_cache",
+                ):
+                    try:
+                        if cand.is_dir():
+                            seed_from_bundle(cand)
+                    except Exception:
+                        pass
+
+                def prog(s):
+                    self.download_msg = s
+
+                onnx_path, codec_path = ensure_models(progress=prog)
+                tts = self._make_tts(onnx_path, codec_path)
                 try:
                     tts.infer("Xin chao cac ban.", voice=config.DEFAULT_VOICE)
                 except Exception:
@@ -143,21 +173,36 @@ class SDKProvider(Provider):
             self.err = f"{e.__class__.__name__}: {e}"
 
     def download_model_sync(self):
-        """Manual / first-run model fetch into HF_HOME (writable)."""
+        """Manual download into flat APPDATA dirs, then load."""
         if self.downloading:
             return False, "Dang tai model..."
         self.downloading = True
-        self.download_msg = "Dang tai model giọng đọc (có thể vài phút)..."
+        self.download_msg = "Dang tai model giong doc (co the vai phut)..."
         self.err = None
         try:
-            # Force online + no HF symlinks (ORT external-data safety on Windows)
             os.environ.pop("HF_HUB_OFFLINE", None)
             os.environ["HF_HUB_DISABLE_SYMLINKS"] = "1"
-            os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
+            from tts.model_store import ensure_models, models_root, MARKER, onnx_dir, codec_dir
+
+            # Force re-download markers off
+            for d in (onnx_dir(), codec_dir()):
+                m = d / MARKER
+                if m.is_file():
+                    m.unlink()
+
+            def prog(s):
+                self.download_msg = s
+
+            onnx_path, codec_path = ensure_models(progress=prog)
             with self._load:
                 self.tts = None
-            self._ensure()
-            self.download_msg = "Da tai xong model"
+                self.tts = self._make_tts(onnx_path, codec_path)
+                try:
+                    self.tts.infer("Xin chao.", voice=config.DEFAULT_VOICE)
+                except Exception:
+                    pass
+                self.err = None
+            self.download_msg = f"Da tai xong model ({models_root()})"
             return True, "OK"
         except Exception as e:
             self.err = f"{e.__class__.__name__}: {e}"
