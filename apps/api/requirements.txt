@@ -2,3 +2,5 @@ fastapi
 uvicorn[standard]
 httpx
 lxml
+# Optional: pip install playwright && playwright install chromium
+# (dùng khi site chặn bot / cần JS — không bắt buộc)

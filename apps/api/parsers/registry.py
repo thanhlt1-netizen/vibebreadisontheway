@@ -1,11 +1,20 @@
 from .base import SourceParser
 from .generic import GenericParser
+from .sites import (
+    TruyenFullParser,
+    MetricTruyenParser,
+    NovelFullParser,
+    RoyalRoadParser,
+)
 
-# Thêm parser riêng cho từng nguồn vào đây (đặt TRƯỚC generic để được ưu tiên).
-# Ví dụ:
-#   from .truyenfull import TruyenFullParser
-#   PARSERS = [TruyenFullParser, ...]
-PARSERS: list[type[SourceParser]] = []
+# Domain-specific trước; GenericParser là fallback cuối.
+PARSERS: list[type[SourceParser]] = [
+    TruyenFullParser,
+    MetricTruyenParser,
+    NovelFullParser,
+    RoyalRoadParser,
+]
+
 
 def pick(url: str) -> SourceParser:
     for cls in PARSERS:

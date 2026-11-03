@@ -1,7 +1,7 @@
 'use strict';
 const $=(s,r=document)=>r.querySelector(s),$$=(s,r=document)=>[...r.querySelectorAll(s)],enc=encodeURIComponent;
 const reduced=matchMedia('(prefers-reduced-motion:reduce)').matches;
-const DEF={theme:'dark',fs:20,lh:1.8,speed:1,voice:'',prefetch:true,key:''};
+const DEF={theme:'dark',fs:20,lh:1.8,speed:1,voice:'',prefetch:true,autoTranslate:true,key:''};
 let settings={...DEF};try{Object.assign(settings,JSON.parse(localStorage.getItem('vr.s')||'{}'))}catch{}
 const saveS=()=>{try{localStorage.setItem('vr.s',JSON.stringify(settings))}catch{}};
 function applyS(){const r=document.documentElement;r.dataset.theme=settings.theme;r.style.setProperty('--fs',settings.fs+'px');r.style.setProperty('--lh',settings.lh);
@@ -90,14 +90,18 @@ function renderBanner(){const b=$('#banner'),ch=S.ch;if(!ch||ch.loading||ch.lang
 function skeleton(){$('#ch-kicker').textContent='';$('#ch-title').textContent='';$('#banner').hidden=true;$('#text').replaceChildren();$('#state').innerHTML=Array.from({length:9},(_,i)=>`<div class="sk" style="width:${i%4==3?'60':'100'}%"></div>`).join('')}
 function applyText(t){S.chunks=t.chunks;$('#ch-title').textContent=t.title||S.ch.title;$('#ch-kicker').textContent=S.novelTitle||(()=>{try{return new URL(S.ch.url).hostname}catch{return''}})()}
 async function translateChapter(play){const ch=S.ch;$('#b-tr')&&($('#b-tr').textContent='Đang dịch…');
- try{const r=await post('/api/translate',{url:ch.url},settings.key?{'X-Anthropic-Key':settings.key}:{});const j=await r.json();if(S.ch!==ch)return;
+ const hdr={};if(settings.key){hdr['X-Api-Key']=settings.key;if(/^sk-ant-/.test(settings.key))hdr['X-Anthropic-Key']=settings.key;else hdr['X-OpenAI-Key']=settings.key}
+ try{const r=await post('/api/translate',{url:ch.url,novel_key:S.novel||ch.url},hdr);const j=await r.json();if(S.ch!==ch)return;
   ch.vi={title:j.title,chunks:j.chunks,original_chunks:j.original_chunks||[]};idb.put('chapters',ch);applyText(ch.vi);renderText();renderBanner();paint();setMedia();if(play)playAt(0)}
  catch(e){toast(e.message);renderBanner();if(/key/i.test(e.message))openSheet()}}
 async function openChapter(url,o={}){stopAudio();S.novel=o.novel||null;S.list=null;S.novelTitle='';S.orig=false;S.ch={url,loading:true};S.chunks=[];S.i=0;skeleton();paint();
  try{let ch=await idb.get('chapters',url);if(!ch||!ch.chunks)ch=await(await api('/api/chapter?url='+enc(url))).json();ch.url=url;idb.put('chapters',ch);if(S.ch?.url!==url)return;
   S.ch=ch;if(S.novel){const n=await idb.get('novels',S.novel);S.list=n?.chapters?.map(c=>c.url)||null;S.novelTitle=n?.title||''}
   $('#state').innerHTML='';
-  if(ch.lang!=='vi'&&!ch.vi){applyText(ch);renderText();renderBanner();paint();setMedia();if(o.autoplay&&o.translate)translateChapter(true);else if(o.autoplay){setPlaying(false)}return}
+  if(ch.lang!=='vi'&&!ch.vi){applyText(ch);renderText();renderBanner();paint();setMedia();
+   const wantTr=o.translate||settings.autoTranslate;
+   if(wantTr){translateChapter(!!(o.autoplay||settings.autoTranslate));return}
+   if(o.autoplay){setPlaying(false)}return}
   applyText(ch.vi||ch);const pr=await idb.get('progress',url);S.i=pr&&pr.chunk<S.chunks.length-1?pr.chunk:0;
   renderText();renderBanner();paint();setMedia();if(o.autoplay)playAt(0);else if(S.local)fetchChunk(S.i)}
  catch(e){if(S.ch?.url!==url)return;S.ch=null;paint();$('#state').innerHTML=`<div class="err"><strong>Không tải được chương</strong><p>${esc(e.message)}</p><button class="pill hot" id="retry">Thử lại</button></div>`;$('#retry').onclick=()=>openChapter(url,o)}}
@@ -128,14 +132,16 @@ addEventListener('hashchange',route);
 /* ---------- Settings sheet ---------- */
 let voicesLoaded=false;
 async function openSheet(){$('#sheet').hidden=false;$$('#s-theme button').forEach(b=>b.setAttribute('aria-pressed',b.dataset.v===settings.theme));
- $('#s-fs').value=settings.fs;$('#o-fs').textContent=settings.fs+'px';$('#s-lh').value=settings.lh;$('#o-lh').textContent=settings.lh;$('#s-pf').checked=settings.prefetch;$('#s-key').value=settings.key;
- if(!voicesLoaded){voicesLoaded=true;try{const h=await(await api('/api/health')).json();$('#s-info').textContent=`TTS: ${h.tts}${h.tts_key?'':' · chưa có VIENEU_API_KEY'} · dịch: ${h.translate_key?'key trên server':'dùng key bên trên'}`;
+ $('#s-fs').value=settings.fs;$('#o-fs').textContent=settings.fs+'px';$('#s-lh').value=settings.lh;$('#o-lh').textContent=settings.lh;$('#s-pf').checked=settings.prefetch;$('#s-autotr')&&($('#s-autotr').checked=!!settings.autoTranslate);$('#s-key').value=settings.key;
+ if(!voicesLoaded){voicesLoaded=true;try{const h=await(await api('/api/health')).json();$('#s-info').textContent=`TTS: ${h.tts}${h.tts_key?'':' · chưa có key'} · dịch: ${h.translate_key?'key server OK':'nhập key bên trên'}${h.playwright?' · Playwright: sẵn sàng':''}`;
   let v=await(await api('/api/voices')).json();v=Array.isArray(v)?v:v.voices||[];const s=$('#s-voice');v.forEach(x=>{const id=typeof x==='string'?x:x.id||x.name,o=new Option(typeof x==='string'?x:x.name||id,id);s.add(o)});s.value=settings.voice}catch(e){$('#s-info').textContent+=' · không tải được danh sách giọng'}}}
 const closeSheet=()=>$('#sheet').hidden=true;
 $('#open-settings').onclick=openSheet;$$('[data-close]').forEach(b=>b.onclick=closeSheet);addEventListener('keydown',e=>{if(e.key==='Escape')closeSheet()});
 $$('#s-theme button').forEach(b=>b.onclick=()=>{settings.theme=b.dataset.v;saveS();applyS();openSheet()});
 const bind=(id,k,f=v=>v,after)=>$(id).oninput=e=>{settings[k]=f(e.target.type==='checkbox'?e.target.checked:e.target.value);saveS();applyS();after&&after()};
-bind('#s-fs','fs',Number,()=>$('#o-fs').textContent=settings.fs+'px');bind('#s-lh','lh',Number,()=>$('#o-lh').textContent=settings.lh);bind('#s-pf','prefetch');bind('#s-key','key',v=>v.trim());
+bind('#s-fs','fs',Number,()=>$('#o-fs').textContent=settings.fs+'px');bind('#s-lh','lh',Number,()=>$('#o-lh').textContent=settings.lh);bind('#s-pf','prefetch');
+ if($('#s-autotr'))$('#s-autotr').onchange=()=>{settings.autoTranslate=$('#s-autotr').checked;saveS()};
+ bind('#s-key','key',v=>v.trim());
 $('#s-voice').onchange=e=>{settings.voice=e.target.value;saveS();S.ac.forEach(a=>a.abort());S.ac.clear();S.cache.clear()};
 
 /* ---------- Dock & phím tắt ---------- */

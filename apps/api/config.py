@@ -20,5 +20,12 @@ SDK_MODE = env("VIENEU_MODE")             # để trống = v3 Turbo; "v3nano" c
 SDK_PRECISION = env("VIENEU_PRECISION")   # "int8" nhanh hơn ~1.6x nếu CPU có VNNI
 MIN_CHARS = 50 if TTS_PROVIDER == "cloud" else 20          # Cloud API: tối thiểu 50 ký tự mỗi request
 ANTHROPIC_KEY = env("ANTHROPIC_API_KEY")
-TRANSLATE_MODEL = env("TRANSLATE_MODEL", "claude-sonnet-5-5")
+TRANSLATE_MODEL = env("TRANSLATE_MODEL", "claude-sonnet-4-5")
+# OpenAI-compatible (DeepSeek mặc định — mạnh dịch tiểu thuyết CN/JP theo cộng đồng open-source)
+OPENAI_KEY = env("OPENAI_API_KEY") or env("DEEPSEEK_API_KEY")
+DEEPSEEK_KEY = env("DEEPSEEK_API_KEY")
+OPENAI_BASE_URL = env("OPENAI_BASE_URL", "https://api.deepseek.com/v1")
+OPENAI_MODEL = env("OPENAI_MODEL", "deepseek-chat")
+# anthropic | openai | auto (chọn theo dạng key)
+TRANSLATE_PROVIDER = env("TRANSLATE_PROVIDER", "auto")
 MAX_PREFETCH_CHARS = int(env("MAX_PREFETCH_CHARS", "30000"))   # chặn tải trước chương quá dài (tốn token Cloud)

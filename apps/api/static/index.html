@@ -74,7 +74,10 @@
       <p class="hint">Dùng khi cài bản không kèm model, hoặc model bị lỗi. Cần mạng, có thể vài phút (~vài trăm MB).</p>
     </div>
     <label class="row">Tải trước chương sau<input id="s-pf" type="checkbox"></label>
-    <label>API key Anthropic (để dịch)<input id="s-key" type="password" placeholder="sk-ant-… (lưu cục bộ trên máy)" autocomplete="off"></label>
+    <label class="row">Tự động dịch chương ngoại ngữ<input id="s-autotr" type="checkbox"></label>
+    <p class="hint">Khi bật: mở chương không phải tiếng Việt sẽ tự dịch sang Việt rồi cho nghe.</p>
+    <label>API key dịch (Anthropic / DeepSeek / OpenAI)<input id="s-key" type="password" placeholder="sk-ant-… hoặc sk-… DeepSeek" autocomplete="off"></label>
+    <p class="hint">Anthropic: sk-ant-… · DeepSeek (rẻ, mạnh tiểu thuyết): key từ platform.deepseek.com. Key chỉ lưu trên máy bạn.</p>
     <p class="hint" id="s-info"></p>
   </div>
 </aside>

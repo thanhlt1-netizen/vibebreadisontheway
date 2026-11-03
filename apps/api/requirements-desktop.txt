@@ -5,3 +5,4 @@ lxml
 vieneu
 pywebview
 pyinstaller
+# Optional JS/bot bypass (large): pip install playwright && playwright install chromium

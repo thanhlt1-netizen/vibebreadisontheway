@@ -39,7 +39,8 @@ async def health():
         "data_dir": config.DATA_DIR,
         "tts": config.TTS_PROVIDER,
         "tts_key": bool(config.API_KEY) or config.TTS_PROVIDER != "cloud",
-        "translate_key": bool(config.ANTHROPIC_KEY),
+        "translate_key": bool(config.ANTHROPIC_KEY or config.OPENAI_KEY or config.DEEPSEEK_KEY),
+        "playwright": __import__("fetcher", fromlist=["playwright_available"]).playwright_available(),
     }
 
 @app.post("/api/tts/download-model")
@@ -88,9 +89,15 @@ class TranslateReq(BaseModel):
     title: str | None = None
     source_lang: str | None = None            # bỏ trống = tự nhận diện
     glossary: dict[str, str] = Field(default_factory=dict)
+    novel_key: str | None = None              # khóa glossary theo truyện (url novel)
 
 @app.post("/api/translate")
-async def translate_ep(req: TranslateReq, x_anthropic_key: str | None = Header(None)):
+async def translate_ep(
+    req: TranslateReq,
+    x_anthropic_key: str | None = Header(None),
+    x_openai_key: str | None = Header(None),
+    x_api_key: str | None = Header(None),
+):
     if req.url:
         ch = await load_chapter(req.url)
         text, title = ch["text"], ch["title"]
@@ -101,11 +108,25 @@ async def translate_ep(req: TranslateReq, x_anthropic_key: str | None = Header(N
     src = req.source_lang or detect_lang(text)
     if src == "vi":
         return {"source_lang": "vi", "title": title, "text": text, "chunks": chunk_text(text), "translated": False}
-    body = await translate(f"{title}\n{text}" if title else text, src, req.glossary, x_anthropic_key)
+    # Ưu tiên header key người dùng nhập (Anthropic hoặc DeepSeek/OpenAI)
+    user_key = x_anthropic_key or x_openai_key or x_api_key
+    body = await translate(
+        f"{title}\n{text}" if title else text,
+        src,
+        req.glossary,
+        user_key,
+        novel_key=req.novel_key,
+    )
     new_title, _, rest = body.partition("\n") if title else ("", "", body)
     rest = sanitize(rest if title else body)
-    return {"source_lang": src, "title": new_title or title, "text": rest, "chunks": chunk_text(rest), "translated": True,
-            "original_chunks": chunk_text(text)}
+    return {
+        "source_lang": src,
+        "title": new_title or title,
+        "text": rest,
+        "chunks": chunk_text(rest),
+        "translated": True,
+        "original_chunks": chunk_text(text),
+    }
 
 # ---------- TTS ----------
 class TTSReq(BaseModel):
