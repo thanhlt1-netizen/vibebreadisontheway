@@ -245,22 +245,12 @@ class SDKProvider(Provider):
     async def download_model(self):
         return await asyncio.to_thread(self.download_model_sync)
 
-    def _infer(self, text, voice):
-        tts = self._ensure()
-        voice = voice or config.DEFAULT_VOICE
-        try:
-            audio = tts.infer(text, voice=voice)
-        except Exception as e:
-            # fallback common presets if wrong voice id
-            if voice not in ("Hải Đăng", "Hai Dang"):
-                try:
-                    audio = tts.infer(text, voice="Hải Đăng")
-                except Exception:
-                    raise RuntimeError(f"infer({voice!r}) failed: {e}") from e
-            else:
-                raise
-        fd, path = tempfile.mkstemp(suffix=".wav")
-        os.close(fd)
+    def _infer_once(self, tts, text, voice):
+        """Single attempt: synthesize + write wav under DATA_DIR (not system temp)."""
+        audio = tts.infer(text, voice=voice)
+        out_dir = os.path.join(config.DATA_DIR, "audio", "tmp")
+        os.makedirs(out_dir, exist_ok=True)
+        path = os.path.join(out_dir, f"{hashlib.sha1((text[:80]+voice).encode()).hexdigest()[:16]}_{int(time.time()*1000)%100000}.wav")
         try:
             tts.save(audio, path)
             with open(path, "rb") as f:
@@ -270,6 +260,38 @@ class SDKProvider(Provider):
                 os.remove(path)
             except OSError:
                 pass
+
+    def _infer(self, text, voice):
+        tts = self._ensure()
+        voice = voice or config.DEFAULT_VOICE
+        text = (text or "").strip()
+        if len(text) < 2:
+            text = text + " ."
+        last = None
+        for attempt in range(3):
+            try:
+                with self._load:  # serialize ONNX with preload/download
+                    return self._infer_once(tts, text, voice)
+            except Exception as e:
+                last = e
+                msg = str(e).lower()
+                # Intermittent Windows "os error 2" under load → retry
+                if attempt < 2 and (
+                    "os error 2" in msg
+                    or "cannot find the file" in msg
+                    or "filenotfound" in e.__class__.__name__.lower()
+                ):
+                    time.sleep(0.4 * (attempt + 1))
+                    continue
+                # wrong voice name
+                if voice not in ("Hải Đăng", "Hai Dang") and attempt == 0:
+                    try:
+                        with self._load:
+                            return self._infer_once(tts, text, "Hải Đăng")
+                    except Exception as e2:
+                        last = e2
+                break
+        raise RuntimeError(f"infer failed after retries: {last}") from last
 
     async def synth(self, text, voice, alive=None):
         if self.downloading:
@@ -282,6 +304,9 @@ class SDKProvider(Provider):
             t0 = time.perf_counter()
             try:
                 data = await asyncio.to_thread(self._infer, text, voice)
+                # transient segment failure must NOT mark whole engine dead
+                if self.tts is not None:
+                    self.err = None
                 ms = (time.perf_counter() - t0) * 1000 / max(len(text), 1)
                 self.ms_per_char = ms if self.ms_per_char is None else self.ms_per_char * 0.7 + ms * 0.3
                 return data
@@ -289,13 +314,9 @@ class SDKProvider(Provider):
                 raise
             except ImportError:
                 raise TTSError(500, "Chua cai VieNeu: pip install vieneu")
-            except FileNotFoundError as e:
-                self.err = str(e)
-                raise TTSError(500, f"Thieu file model: {e}. Mo Cai dat → Tai goi giong doc")
             except Exception as e:
                 msg = f"{e.__class__.__name__}: {e}"
-                self.err = msg
-                # os error 2 → almost always missing weight/DLL, not "slow"
+                # keep engine; only report segment error
                 raise TTSError(500, f"VieNeu (local) loi: {e}")
 
     async def cached(self, text, voice, alive=None):

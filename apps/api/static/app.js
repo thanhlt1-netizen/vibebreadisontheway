@@ -51,7 +51,7 @@ function paint(){const n=S.chunks.length,d=$('#dock');d.hidden=!S.ch;$('#d-title
  else{d.classList.remove('cd');$('#stay').hidden=true;$('#d-sub').textContent=S.playing&&!S.ready?'Đang nạp giọng đọc… (chỉ lần đầu)':n?`Đoạn ${S.i+1}/${n}${S.playing?'':' · tạm dừng'}`:'Đang tải…';
   ring(n?(S.i+(A.duration&&S.playing?A.currentTime/A.duration:0))/n:0)}}
 function setPlaying(b){S.playing=b;morphTo(b?1:0);$('#dock').classList.toggle('playing',b);if('mediaSession'in navigator)navigator.mediaSession.playbackState=b?'playing':'paused';paint()}
-const WIN=()=>S.local?3:1;
+const WIN=()=>S.local?1:1;
 async function ttsPost(text,signal){
  const r=await api('/api/tts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,voice:settings.voice||undefined}),signal});
  if(!r.ok){let d='';try{const j=await r.json();d=typeof j.detail==='string'?j.detail:JSON.stringify(j.detail||j)}catch{try{d=await r.text()}catch{}}const err=new Error(d||('TTS HTTP '+r.status));err.status=r.status;throw err}
@@ -65,6 +65,7 @@ function fetchChunk(i){if(i<0||i>=S.chunks.length)return Promise.resolve(null);
    catch(e){last=e;if(e.name==='AbortError')throw e;
     const m=String(e.message||'');
     if(e.status===503||/dang nap|dang tai|chua san sang|503/i.test(m)){toast('Đang nạp model… thử lại sau vài giây');await new Promise(r=>setTimeout(r,2500));continue}
+    if(/os error 2|cannot find the file/i.test(m) && a<4){await new Promise(r=>setTimeout(r,500*(a+1));continue}
     throw e}
   }
   throw last||new Error('TTS timeout khi nạp model');
@@ -76,11 +77,16 @@ async function playAt(i){if(!S.chunks.length)return;cancelCd();const tok=++S.tok
  catch(e){if(tok!==S.tok)return;
   if(e.name==='NotAllowedError'){setPlaying(false);toast('Nhấn ▶ để tiếp tục nghe');return}
   const msg=e.message||String(e);
-  if(/os error 2|file specified|thieu file|model loi|chua cai|chua san sang|VieNeu/i.test(msg)){
+  // Transient os error 2: retry same segment once, then skip (model is loaded if other segs work)
+  if(/os error 2|file specified|VieNeu/i.test(msg) && !S._retried){
+   S._retried=true;S.cache.delete(S.i);toast('Đoạn lỗi tạm thời, thử lại…');
+   setTimeout(()=>playAt(S.i),600);return}
+  S._retried=false;
+  if(/thieu file|chua cai|chua san sang|model loi/i.test(msg) && !/os error 2/i.test(msg)){
    setPlaying(false);S.cache.delete(S.i);
    toast(msg.slice(0,160)+' — mở Cài đặt → Tải gói giọng đọc');
    try{openSheet()}catch{};return}
-  if(S.i+1<S.chunks.length){toast('Đoạn '+(S.i+1)+' lỗi, bỏ qua: '+msg.slice(0,80));S.cache.delete(S.i);playAt(S.i+1)}
+  if(S.i+1<S.chunks.length){toast('Đoạn '+(S.i+1)+' lỗi, bỏ qua');S.cache.delete(S.i);playAt(S.i+1)}
   else{setPlaying(false);toast(msg)}
  }}
 function toggle(){if(S.cd){cancelCd();return}if(S.playing){A.pause();setPlaying(false)}else if(S.resumable&&A.src&&!A.ended){A.play().then(()=>setPlaying(true)).catch(e=>toast(e.message))}else playAt(S.i)}

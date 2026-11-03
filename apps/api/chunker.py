@@ -24,4 +24,5 @@ def chunk_text(text: str, max_len: int = 350, min_len: int = MIN_CHARS, first_ma
             merged.append(c)
     if first_max and merged and len(merged[0]) > first_max * 1.5:   # đoạn đầu ngắn → nghe được sớm
         merged[0:1] = chunk_text(merged[0], first_max, min_len, first_max=0)
-    return merged
+    # Drop empty / tiny noise chunks that make some engines throw
+    return [c for c in merged if c and len(c.strip()) >= 2]
