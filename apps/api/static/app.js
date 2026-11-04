@@ -1,4 +1,4 @@
-/* viberead-ui 0.6-bubble-morph */
+/* viberead-ui 0.7-motion */
 'use strict';
 const $=(s,r=document)=>r.querySelector(s),$$=(s,r=document)=>[...r.querySelectorAll(s)],enc=encodeURIComponent;
 const reduced=matchMedia('(prefers-reduced-motion:reduce)').matches;
@@ -130,7 +130,7 @@ function markActive(){
  const p=$(`#text p[data-i="${S.i}"]`);
  if(p&&S.playing){const r=p.getBoundingClientRect(),vh=innerHeight;if(r.top<vh*.22||r.bottom>vh*.72)p.scrollIntoView({block:'center',behavior:reduced?'auto':'smooth'})}
 }
-function renderText(){const src=S.orig&&S.ch.vi?S.ch.vi.original_chunks:S.chunks;$('#text').replaceChildren(...src.map((t,i)=>{const p=document.createElement('p');p.textContent=t;p.dataset.i=i;p.onclick=()=>{if(!(S.orig&&S.ch.vi))playAt(i)};return p}));markActive();renderFoot()}
+function renderText(){const src=S.orig&&S.ch.vi?S.ch.vi.original_chunks:S.chunks;$('#text').replaceChildren(...src.map((t,i)=>{const p=document.createElement('p');p.textContent=t;p.dataset.i=i;p.style.setProperty('--i',String(i));p.onclick=()=>{if(!(S.orig&&S.ch.vi))playAt(i)};return p}));markActive();renderFoot()}
 function renderFoot(){const f=$('#ch-foot');if(!f||!S.ch)return;const hasP=!!prevUrl(),hasN=!!nextUrl();f.hidden=!hasP&&!hasN;
  const bp=$('#foot-prev'),bn=$('#foot-next');if(bp){bp.disabled=!hasP;bp.onclick=()=>step(-1)}if(bn){bn.disabled=!hasN;bn.onclick=()=>step(1)}}
 function renderBanner(){const b=$('#banner'),ch=S.ch;if(!ch||ch.loading||ch.lang==='vi'){b.hidden=true;return}b.hidden=false;
@@ -161,11 +161,11 @@ async function openNovel(url){const head=$('#novel-head'),ol=$('#chapters');head
  try{const n=await(await api('/api/novel?url='+enc(url))).json();n.url=url;idb.put('novels',n);const prog=new Map((await idb.all('progress')||[]).map(p=>[p.url,p]));
   head.innerHTML=`${n.cover?`<img src="${esc(n.cover)}" alt="">`:''}<div><p class="kicker">${n.chapters.length} chương</p><h1>${esc(n.title)}</h1></div>`;
   if(!n.chapters.length){ol.innerHTML='<li class="empty">Chưa nhận diện được mục lục. Dán link một chương để nghe.</li>';return}
-  let shown=0;const more=()=>{n.chapters.slice(shown,shown+300).forEach(c=>{const p=prog.get(c.url),li=document.createElement('li');li.innerHTML=`<button class="${p&&p.chunk>=p.total-1?'done':p?'cur':''}"><span>${esc(c.title)}</span><span>${p?(p.chunk>=p.total-1?'✓':Math.round(p.chunk/p.total*100)+'%'):''}</span></button>`;li.firstChild.onclick=()=>go(readHash(c.url,url));ol.append(li)});shown+=300;if(shown<n.chapters.length){const li=document.createElement('li');li.innerHTML='<button><span>Hiện thêm…</span></button>';li.firstChild.onclick=()=>{li.remove();more()};ol.append(li)}};more()}
+  let shown=0;const more=()=>{n.chapters.slice(shown,shown+300).forEach((c,j)=>{const p=prog.get(c.url),li=document.createElement('li');li.style.setProperty('--i',String(shown+j));li.innerHTML=`<button class="${p&&p.chunk>=p.total-1?'done':p?'cur':''}"><span>${esc(c.title)}</span><span>${p?(p.chunk>=p.total-1?'✓':Math.round(p.chunk/p.total*100)+'%'):''}</span></button>`;li.firstChild.onclick=()=>go(readHash(c.url,url));ol.append(li)});shown+=300;if(shown<n.chapters.length){const li=document.createElement('li');li.innerHTML='<button><span>Hiện thêm…</span></button>';li.firstChild.onclick=()=>{li.remove();more()};ol.append(li)}};more()}
  catch(e){head.innerHTML=`<div class="err"><strong>Không đọc được trang truyện</strong><p>${esc(e.message)}</p></div>`}}
-async function renderRecent(){const all=((await idb.all('progress'))||[]).sort((a,b)=>b.t-a.t).slice(0,8),box=$('#recent');
+async async function renderRecent(){const all=((await idb.all('progress'))||[]).sort((a,b)=>b.t-a.t).slice(0,8),box=$('#recent');
  if(!all.length){box.innerHTML='<div class="empty"><i class="eq"><b></b><b></b><b></b><b></b></i><span>Chưa có gì để nghe. Dán link chương bạn đang đọc ở trên — app sẽ nhớ đến từng đoạn.</span></div>';return}
- box.replaceChildren(...all.map(p=>{const b=document.createElement('button');b.className='card';b.innerHTML=`<small>${esc(p.novelTitle||'Đang nghe')}</small><strong>${esc(p.title||p.url)}</strong><i style="transform:scaleX(${p.total?p.chunk/p.total:0})"></i>`;b.onclick=()=>go(readHash(p.url,p.novel));return b}))}
+ box.replaceChildren(...all.map((p,i)=>{const b=document.createElement('button');b.className='card';b.style.setProperty('--i',i);b.innerHTML=`<small>${esc(p.novelTitle||'Đang nghe')}</small><strong>${esc(p.title||p.url)}</strong><i style="transform:scaleX(${p.total?Math.min(1,p.chunk/p.total):0})"></i>`;b.onclick=()=>go(readHash(p.url,p.novel));return b}))}
 $('#add').onsubmit=async e=>{e.preventDefault();const u=normUrl($('#url').value),b=$('#go');if(!u){toast('Nhập link truyện/chương');return;}b.classList.add('busy');b.firstChild.textContent='…';
  try{const r=await(await api('/api/resolve?url='+enc(u))).json();go((r.kind==='novel'?'#/novel?url=':'#/read?url=')+enc(u))}catch(e){toast(e.message)}finally{b.classList.remove('busy');b.firstChild.textContent='Nghe'}};
 

@@ -255,3 +255,91 @@ input[type=range]{accent-color:var(--mint)}input[type=checkbox]{accent-color:var
 .btn-dl:hover{border-color:var(--mint);background:color-mix(in srgb,var(--mint) 22%,transparent)}
 .btn-dl:disabled{opacity:.5;cursor:wait}
 .btn-dl.busy{opacity:.7}
+
+/* ========== Motion system v0.7 ========== */
+.card{
+  border-radius:28% 32% 30% 34% / 18% 20% 18% 22%;
+  animation:cardIn .7s var(--ease) both;
+  animation-delay:calc(var(--i,0) * 70ms);
+  transition:transform .5s var(--ease),border-color .3s,box-shadow .5s,border-radius .9s var(--ease);
+}
+.card:hover{
+  border-radius:32% 28% 34% 30% / 22% 18% 24% 16%;
+  transform:translateY(-5px) scale(1.01);
+}
+@keyframes cardIn{from{opacity:0;transform:translateY(18px) scale(.97)}to{opacity:1;transform:none}}
+
+.chlist li{animation:rowIn .55s var(--ease) both;animation-delay:calc(var(--i,0)*28ms)}
+@keyframes rowIn{from{opacity:0;transform:translateX(-12px)}to{opacity:1;transform:none}}
+.chlist button{
+  border-radius:0;
+  transition:padding .4s var(--ease),color .25s,background .35s,transform .35s var(--ease),border-radius .6s;
+}
+.chlist button:hover{
+  padding-left:1rem;color:var(--mint);
+  background:linear-gradient(90deg,color-mix(in srgb,var(--mint) 10%,transparent),transparent 70%);
+  border-radius:0 20px 20px 0;
+}
+.chlist .cur button{
+  background:linear-gradient(90deg,color-mix(in srgb,var(--ember) 12%,transparent),transparent 65%);
+  color:var(--fg);
+}
+
+#text p{animation:lineIn .5s var(--ease) both;animation-delay:calc(min(var(--i,0),24) * 28ms)}
+@keyframes lineIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+#text p.on{
+  animation:pulseLine 2.4s ease-in-out infinite;
+}
+@keyframes pulseLine{
+  0%,100%{background:linear-gradient(90deg,color-mix(in srgb,var(--mint) 12%,transparent),transparent 75%)}
+  50%{background:linear-gradient(90deg,color-mix(in srgb,var(--mint) 20%,transparent),transparent 80%)}
+}
+
+#ch-title{animation:titleIn .7s var(--ease) both}
+@keyframes titleIn{from{opacity:0;transform:translateY(16px);filter:blur(4px)}to{opacity:1;transform:none;filter:none}}
+#ch-kicker{animation:titleIn .6s var(--ease) both;animation-delay:.05s}
+
+#banner{animation:bannerIn .55s var(--ease) both;border-radius:18px 28px 16px 24px / 40% 50% 40% 50%}
+@keyframes bannerIn{from{opacity:0;transform:scale(.96) translateY(8px)}to{opacity:1;transform:none}}
+
+#dock .dock-in{animation:dockBob 5s ease-in-out infinite}
+@keyframes dockBob{0%,100%{transform:translateY(0)}50%{transform:translateY(-2px)}}
+body.listening #dock .dock-in{
+  box-shadow:0 1px 0 color-mix(in srgb,var(--fg) 9%,transparent) inset,0 30px 60px -20px #000,0 0 0 1px color-mix(in srgb,var(--mint) 25%,#0004),0 0 40px -16px color-mix(in srgb,var(--mint) 30%,transparent);
+}
+
+#toast{
+  border-radius:40% 60% 50% 50% / 50% 50% 50% 50%;
+  animation:none;
+  box-shadow:0 16px 40px -18px #000c;
+}
+#toast.on{
+  animation:toastPop .55s var(--ease) both,blobBreathe 5s ease-in-out .55s infinite;
+}
+@keyframes toastPop{from{opacity:0;transform:translate(-50%,24px) scale(.9)}to{opacity:1;transform:translate(-50%,0) scale(1)}}
+
+.brand{transition:transform .4s var(--ease),letter-spacing .4s}
+.brand:hover{transform:scale(1.03);letter-spacing:.02em}
+.brand .eq b{animation:eq 1.2s ease-in-out infinite alternate}
+.brand .eq b:nth-child(2){animation-delay:-.25s}.brand .eq b:nth-child(3){animation-delay:-.5s}
+
+#add{border-radius:28px 32px 30px 34px / 40% 45% 40% 45%;transition:border-radius .8s var(--ease),border-color .3s,box-shadow .4s}
+#add:focus-within{border-radius:34px 28px 36px 30px / 48% 40% 50% 42%}
+
+#novel-head img{transition:transform .6s var(--ease),border-radius .8s;border-radius:18% 22% 20% 24% / 12% 14% 12% 14%}
+#novel-head img:hover{transform:scale(1.04) rotate(-1deg);border-radius:22% 18% 24% 16% / 14% 12% 16% 10%}
+
+.panel{border-radius:24px 0 0 24px}
+.scrim{backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)}
+
+.view{animation:viewIn .65s var(--ease) both}
+@keyframes viewIn{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
+
+.ch-foot{animation:footIn .6s var(--ease) both;animation-delay:.15s}
+@keyframes footIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+
+@media (prefers-reduced-motion:reduce){
+  .card,.chlist li,#text p,#ch-title,#banner,#toast.on,.view,.ch-foot{animation:none!important}
+  #dock .dock-in{animation:none}
+  #text p.on{animation:none}
+}
