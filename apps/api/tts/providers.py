@@ -282,38 +282,73 @@ class SDKProvider(Provider):
 
     def _infer_once(self, tts, text, voice):
         from textutil import for_tts
-        audio = tts.infer(for_tts(text), voice=voice)
+        clean = for_tts(text)
+        # Prefer no voice kw if default — some builds look for missing ref files
+        try:
+            if voice:
+                audio = tts.infer(clean, voice=voice)
+            else:
+                audio = tts.infer(clean)
+        except TypeError:
+            audio = tts.infer(clean, voice=voice or config.DEFAULT_VOICE)
         return self._audio_to_wav_bytes(tts, audio)
+
+    def _reset_engine(self):
+        """Drop broken ONNX session so next _ensure reloads graphs."""
+        with self._load:
+            self.tts = None
+            self.err = None
 
     def _infer(self, text, voice):
         # Caller already holds asyncio lock; only serialize vs preload thread
-        tts = self._ensure()
-        voice = voice or config.DEFAULT_VOICE
+        voice = (voice or config.DEFAULT_VOICE or "").strip() or config.DEFAULT_VOICE
         text = (text or "").strip()
         if len(text) < 2:
             text = text + " ."
         last = None
-        for attempt in range(3):
+        voices_try = [voice]
+        if voice not in ("Hải Đăng", "Hai Dang", "Hải Đăng"):
+            voices_try.append("Hải Đăng")
+        # empty voice = package default
+        voices_try.append("")
+
+        for attempt in range(4):
             try:
+                tts = self._ensure()
                 with self._load:
-                    return self._infer_once(tts, text, voice)
+                    return self._infer_once(tts, text, voices_try[min(attempt, len(voices_try) - 1)])
             except Exception as e:
                 last = e
                 msg = str(e).lower()
-                if attempt < 2 and (
+                missing = (
                     "os error 2" in msg
                     or "cannot find the file" in msg
                     or "filenotfound" in e.__class__.__name__.lower()
-                ):
-                    time.sleep(0.25 * (attempt + 1))
+                    or "no such file" in msg
+                )
+                if missing:
+                    # Session may be corrupt / external weight handle stale
+                    if attempt == 1:
+                        self._reset_engine()
+                    time.sleep(0.35 * (attempt + 1))
                     continue
-                if voice not in ("Hải Đăng", "Hai Dang") and attempt == 0:
-                    try:
-                        with self._load:
-                            return self._infer_once(tts, text, "Hải Đăng")
-                    except Exception as e2:
-                        last = e2
+                # Non-file errors: try alternate voice once
+                if attempt == 0 and len(voices_try) > 1:
+                    continue
                 break
+
+        # Last resort: split long text and synth first half (keeps playback alive)
+        if last and len(text) > 80:
+            try:
+                cut = max(text.rfind(" ", 0, len(text) // 2), len(text) // 3)
+                half = text[:cut].strip()
+                if half:
+                    tts = self._ensure()
+                    with self._load:
+                        return self._infer_once(tts, half, "Hải Đăng")
+            except Exception as e2:
+                last = e2
+
         raise RuntimeError(f"infer failed after retries: {last}") from last
 
     async def synth(self, text, voice, alive=None):

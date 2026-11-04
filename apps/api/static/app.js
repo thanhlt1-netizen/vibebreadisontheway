@@ -76,7 +76,7 @@ function fetchChunk(i){if(i<0||i>=S.chunks.length)return Promise.resolve(null);i
    catch(e){last=e;if(e.name==='AbortError')throw e;
     const m=String(e.message||'');
     if(e.status===503||/dang nap|dang tai|chua san sang|503/i.test(m)){if(a===0)toast('Đang nạp model…');await new Promise(r=>setTimeout(r,1200));continue}
-    if(/os error 2|cannot find the file/i.test(m) && a<3){await new Promise(r=>setTimeout(r,300*(a+1));continue}
+    if(/os error 2|cannot find the file|infer failed|file specified/i.test(m) && a<5){await new Promise(r=>setTimeout(r,400*(a+1));continue}
     throw e}
   }
   throw last||new Error('TTS timeout khi nạp model');
@@ -88,17 +88,23 @@ async function playAt(i){if(!S.chunks.length)return;cancelCd();const tok=++S.tok
  catch(e){if(tok!==S.tok)return;
   if(e.name==='NotAllowedError'){setPlaying(false);toast('Nhấn ▶ để tiếp tục nghe');return}
   const msg=e.message||String(e);
-  // Transient os error 2: retry same segment once, then skip (model is loaded if other segs work)
-  if(/os error 2|file specified|VieNeu/i.test(msg) && !S._retried){
-   S._retried=true;S.cache.delete(S.i);toast('Đoạn lỗi tạm thời, thử lại…');
-   setTimeout(()=>playAt(S.i),600);return}
+  const transient=/os error 2|cannot find the file|file specified|infer failed|VieNeu/i.test(msg);
+  // Retry same segment once silently
+  if(transient && !S._retried){
+   S._retried=true;S.cache.delete(S.i);
+   setTimeout(()=>playAt(S.i),500);return}
   S._retried=false;
-  if(/thieu file|chua cai|chua san sang|model loi/i.test(msg) && !/os error 2/i.test(msg)){
+  // Engine truly missing only if never heard a successful segment
+  if(/thieu file|chua cai|chua san sang|model loi|tai goi/i.test(msg) && !S._heardOk){
    setPlaying(false);S.cache.delete(S.i);
-   toast(msg.slice(0,140)+' — Cài đặt → Tải gói giọng đọc');
-   if(!S._heardOk)try{openSheet()}catch{};return}
-  if(S.i+1<S.chunks.length){S.cache.delete(S.i);playAt(S.i+1)}
-  else{setPlaying(false);toast(msg)}
+   toast('Chưa sẵn sàng giọng đọc — mở Cài đặt → Tải gói giọng đọc');
+   try{openSheet()}catch{};return}
+  // Skip broken segment, keep listening
+  S.cache.delete(S.i);
+  if(S.i+1<S.chunks.length){
+   if(transient){/* quiet skip */} else toast('Bỏ qua một đoạn, tiếp tục…');
+   playAt(S.i+1)}
+  else{setPlaying(false);if(!transient)toast(msg.slice(0,120))}
  }}
 function toggle(){if(S.cd){cancelCd();return}if(S.playing){A.pause();setPlaying(false)}else if(S.resumable&&A.src&&!A.ended){A.play().then(()=>setPlaying(true)).catch(e=>toast(e.message))}else playAt(S.i)}
 function stopAudio(){S.tok++;A.pause();A.removeAttribute('src');S.resumable=false;S.ac.forEach(a=>a.abort());S.ac.clear();S.cache.forEach(v=>v.then(u=>u&&URL.revokeObjectURL(u),()=>{}));S.cache.clear();cancelCd();S.pf=false;setPlaying(false)}
