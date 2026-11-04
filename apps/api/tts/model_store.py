@@ -115,6 +115,21 @@ def prefer_onnx_dir(want_int8: bool = True) -> str:
         return str(od8)
     return str(onnx_dir())
 
+
+def force_repair() -> None:
+    """Delete readiness markers + zero-byte files so ensure_models re-downloads."""
+    for d in (onnx_dir(), codec_dir(), models_root() / "onnx_int8"):
+        d.mkdir(parents=True, exist_ok=True)
+        m = d / MARKER
+        if m.is_file():
+            m.unlink()
+        for f in list(d.iterdir()) if d.is_dir() else []:
+            try:
+                if f.is_file() and (f.stat().st_size == 0 or f.suffix in {".tmp", ".partial"}):
+                    f.unlink()
+            except OSError:
+                pass
+
 def ensure_models(progress=None) -> tuple[str, str]:
     """
     Ensure flat onnx + codec dirs exist. Returns (onnx_dir, codec_dir).

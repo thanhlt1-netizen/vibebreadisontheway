@@ -110,7 +110,7 @@ class SDKProvider(Provider):
             "ms_per_char": self.ms_per_char,
         }
 
-    def _make_tts(self, onnx_path: str, codec_path: str):
+    def _make_tts(self, onnx_path: str, codec_path: str, precision: str = "fp32"):
         """Load VieNeu with flat onnx_dir + codec_dir (avoids HF symlink/ORT bug)."""
         os.environ.pop("HF_HUB_OFFLINE", None)
         os.environ["HF_HUB_DISABLE_SYMLINKS"] = "1"
@@ -127,7 +127,7 @@ class SDKProvider(Provider):
         lite.OnnxV3LiteEngine.__init__ = _patched_init
         try:
             from vieneu import Vieneu
-            prec = config.SDK_PRECISION or "int8"
+            prec = precision or "fp32"
             kw = {"backend": "onnx", "onnx_dir": onnx_path, "precision": prec}
             if config.SDK_MODE:
                 kw["mode"] = config.SDK_MODE
@@ -136,13 +136,26 @@ class SDKProvider(Provider):
             try:
                 return Vieneu(**kw)
             except Exception:
-                # int8 graphs missing or CPU without VNNI → fp32
                 if prec != "fp32":
                     kw["precision"] = "fp32"
                     return Vieneu(**kw)
                 raise
         finally:
             lite.OnnxV3LiteEngine.__init__ = _orig_init
+
+    def _smoke(self, tts) -> None:
+        """Must produce audio or we reject the session."""
+        last = None
+        for voice in (None, config.DEFAULT_VOICE, "Hải Đăng"):
+            try:
+                if voice:
+                    tts.infer("Xin chao.", voice=voice)
+                else:
+                    tts.infer("Xin chao.")
+                return
+            except Exception as e:
+                last = e
+        raise RuntimeError(f"Smoke infer failed: {last}") from last
 
     def _ensure(self):
         with self._load:
@@ -151,7 +164,9 @@ class SDKProvider(Provider):
             self.downloading = True
             self.download_msg = "Dang nap model..."
             try:
-                from tts.model_store import ensure_models, seed_from_bundle, diagnose, prefer_onnx_dir
+                from tts.model_store import (
+                    ensure_models, seed_from_bundle, diagnose, prefer_onnx_dir, force_repair,
+                )
                 from pathlib import Path
 
                 for cand in (
@@ -168,30 +183,40 @@ class SDKProvider(Provider):
                 def prog(s):
                     self.download_msg = s
 
+                # Always load fp32 flat dir unless user forces int8 AND files ready
+                want8 = (config.SDK_PRECISION or "fp32").lower() == "int8"
                 onnx_path, codec_path = ensure_models(progress=prog)
-                # Prefer int8 flat dir when available (faster CPU)
-                want8 = (config.SDK_PRECISION or "int8") == "int8"
-                onnx_path = prefer_onnx_dir(want_int8=want8) or onnx_path
+                if want8:
+                    onnx_path = prefer_onnx_dir(want_int8=True) or onnx_path
+                else:
+                    onnx_path = prefer_onnx_dir(want_int8=False)
+
                 diag = diagnose()
-                if diag["onnx_missing"] or diag["codec_missing"]:
+                # If using onnx/ but missing files listed relative to that folder
+                from tts.model_store import onnx_dir, missing_files, GRAPH_FILES
+                miss = missing_files(Path(onnx_path), GRAPH_FILES)
+                if miss or diag["codec_missing"]:
                     raise FileNotFoundError(
                         "Thieu file model: "
-                        + ", ".join(diag["onnx_missing"] + diag["codec_missing"])
+                        + ", ".join(miss + diag["codec_missing"])
                         + f" (onnx={onnx_path})"
                     )
 
-                tts = self._make_tts(onnx_path, codec_path)
-                # Smoke test — must succeed or we keep tts=None
-                voice = config.DEFAULT_VOICE
+                prec = "int8" if (want8 and "onnx_int8" in onnx_path.replace("\\", "/")) else "fp32"
+                tts = self._make_tts(onnx_path, codec_path, precision=prec)
                 try:
-                    tts.infer("Xin chao.", voice=voice)
+                    self._smoke(tts)
                 except Exception as e1:
-                    # try default preset name
-                    try:
-                        tts.infer("Xin chao.", voice="Hải Đăng")
-                        voice = "Hải Đăng"
-                    except Exception:
-                        raise RuntimeError(f"Model load OK but infer failed: {e1}") from e1
+                    # Corrupt cache → repair once then reload
+                    msg = str(e1).lower()
+                    if "file" in msg or "os error" in msg or "onnx" in msg:
+                        self.download_msg = "Cache loi, dang tai lai model..."
+                        force_repair()
+                        onnx_path, codec_path = ensure_models(progress=prog)
+                        tts = self._make_tts(onnx_path, codec_path, precision="fp32")
+                        self._smoke(tts)
+                    else:
+                        raise
                 self.tts = tts
                 self.err = None
                 self.download_msg = "Model san sang"
@@ -212,7 +237,7 @@ class SDKProvider(Provider):
             self.err = f"{e.__class__.__name__}: {e}"
 
     def download_model_sync(self):
-        """Manual download into flat APPDATA dirs, then load."""
+        """Manual download into flat APPDATA dirs, then load (fp32)."""
         if self.downloading:
             return False, "Dang tai model..."
         self.downloading = True
@@ -221,13 +246,9 @@ class SDKProvider(Provider):
         try:
             os.environ.pop("HF_HUB_OFFLINE", None)
             os.environ["HF_HUB_DISABLE_SYMLINKS"] = "1"
-            from tts.model_store import ensure_models, models_root, MARKER, onnx_dir, codec_dir
+            from tts.model_store import ensure_models, models_root, force_repair
 
-            # Force re-download markers off
-            for d in (onnx_dir(), codec_dir()):
-                m = d / MARKER
-                if m.is_file():
-                    m.unlink()
+            force_repair()
 
             def prog(s):
                 self.download_msg = s
@@ -235,17 +256,15 @@ class SDKProvider(Provider):
             onnx_path, codec_path = ensure_models(progress=prog)
             with self._load:
                 self.tts = None
-                self.tts = self._make_tts(onnx_path, codec_path)
-                try:
-                    self.tts.infer("Xin chao.", voice=config.DEFAULT_VOICE)
-                except Exception:
-                    pass
+                self.tts = self._make_tts(onnx_path, codec_path, precision="fp32")
+                self._smoke(self.tts)
                 self.err = None
             self.download_msg = f"Da tai xong model ({models_root()})"
             return True, "OK"
         except Exception as e:
             self.err = f"{e.__class__.__name__}: {e}"
             self.download_msg = f"Loi: {self.err}"
+            self.tts = None
             return False, self.err
         finally:
             self.downloading = False
@@ -327,10 +346,10 @@ class SDKProvider(Provider):
                     or "no such file" in msg
                 )
                 if missing:
-                    # Session may be corrupt / external weight handle stale
-                    if attempt == 1:
+                    # Only hard-reset once per call; prefer retry same session first
+                    if attempt == 2:
                         self._reset_engine()
-                    time.sleep(0.35 * (attempt + 1))
+                    time.sleep(0.3 * (attempt + 1))
                     continue
                 # Non-file errors: try alternate voice once
                 if attempt == 0 and len(voices_try) > 1:

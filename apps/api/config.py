@@ -18,7 +18,7 @@ def _data_dir():
 DATA_DIR = _data_dir()
 CACHE_DIR = env("AUDIO_CACHE_DIR", os.path.join(DATA_DIR, "audio"))
 SDK_MODE = env("VIENEU_MODE")             # để trống = v3 Turbo; "v3nano" cho máy yếu
-SDK_PRECISION = env("VIENEU_PRECISION", "int8" if TTS_PROVIDER == "sdk" else "")
+SDK_PRECISION = env("VIENEU_PRECISION", "fp32")  # fp32 ổn định; int8 chỉ khi set tay + đủ file
 SDK_THREADS = int(env("VIENEU_THREADS", "0"))  # 0 = auto
 MIN_CHARS = 50 if TTS_PROVIDER == "cloud" else 16
 ANTHROPIC_KEY = env("ANTHROPIC_API_KEY")
