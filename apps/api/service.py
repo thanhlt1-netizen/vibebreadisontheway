@@ -13,6 +13,8 @@ _CH_TTL = 900  # 15 min
 
 
 async def load_chapter(url: str, *, bypass_cache: bool = False) -> dict:
+    from fetcher import normalize_url
+    url = normalize_url(url)
     now = time.time()
     if not bypass_cache:
         hit = _CH_CACHE.get(url)

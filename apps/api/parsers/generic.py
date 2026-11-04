@@ -191,14 +191,24 @@ def _extract_text(block) -> str:
     return "\n".join(lines)
 
 
+def _same_page(a: str, b: str) -> bool:
+    pa, pb = urlparse(a), urlparse(b)
+    return (pa.netloc.lower(), pa.path.rstrip("/")) == (pb.netloc.lower(), pb.path.rstrip("/"))
+
+
 def _find_nav_link(tree, base: str, pattern: re.Pattern) -> str | None:
+    """Find prev/next chapter link; reject same-page / non-http / junk."""
+    candidates: list[str] = []
+
     # 1) rel=next / rel=prev
     rel = "next" if pattern is NEXT_RE else "prev"
     for a in tree.xpath(f"//a[@rel='{rel}' and @href]"):
-        return urljoin(base, a.get("href"))
+        href = a.get("href") or ""
+        if href and not href.startswith(("#", "javascript:", "mailto:")):
+            candidates.append(urljoin(base, href))
 
-    # 2) class / id gợi ý
-    hints = ("next", "sau") if pattern is NEXT_RE else ("prev", "previous", "truoc", "trước")
+    # 2) class / id / text hints
+    hints = ("next", "sau", "tiếp") if pattern is NEXT_RE else ("prev", "previous", "truoc", "trước")
     for a in tree.xpath("//a[@href]"):
         blob = " ".join(
             filter(
@@ -212,11 +222,31 @@ def _find_nav_link(tree, base: str, pattern: re.Pattern) -> str | None:
                 ],
             )
         )
-        if pattern.search(blob) or any(h in blob.lower() for h in hints if len(h) > 3):
+        if pattern.search(blob) or any(h in blob.lower() for h in hints if len(h) > 2):
             href = a.get("href") or ""
-            if href and not href.startswith(("#", "javascript:")):
-                return urljoin(base, href)
-    return None
+            if href and not href.startswith(("#", "javascript:", "mailto:")):
+                candidates.append(urljoin(base, href))
+
+    # Prefer chapter-like paths; skip same page / home / list-only
+    scored: list[tuple[int, str]] = []
+    for full in candidates:
+        if _same_page(full, base):
+            continue
+        path = urlparse(full).path.lower()
+        if path in ("", "/"):
+            continue
+        score = 0
+        if CHAPTER_URL_RE.search(path):
+            score += 5
+        if any(x in path for x in ("chuong", "chapter", "chap", "/c/", "episode")):
+            score += 3
+        if re.search(r"\d+", path):
+            score += 2
+        scored.append((score, full))
+    if not scored:
+        return None
+    scored.sort(key=lambda x: -x[0])
+    return scored[0][1]
 
 
 def _title_from_tree(tree) -> str:

@@ -90,6 +90,10 @@ async def tts_diagnose():
 
 @app.get("/api/resolve")
 async def resolve(url: str):
+    from fetcher import normalize_url
+    url = normalize_url(url)
+    if not url:
+        raise HTTPException(400, "Thiếu URL")
     path = urlparse(url).path.lower()
     # Nhận diện URL chương: chuong/chapter/chap/ep/episode/part + số, hoặc /c12, /chapter-12.html
     kind = "chapter" if re.search(
@@ -97,15 +101,43 @@ async def resolve(url: str):
         path,
         re.I,
     ) else "novel"
-    return {"kind": kind, "parser": type(pick(url)).__name__}
+    return {"kind": kind, "parser": type(pick(url)).__name__, "url": url}
 
 @app.get("/api/novel")
 async def novel(url: str):
-    return dataclasses.asdict(await pick(url).get_novel(url, await fetch(url)))
+    from fetcher import normalize_url
+    url = normalize_url(url)
+    try:
+        return dataclasses.asdict(await pick(url).get_novel(url, await fetch(url)))
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(502, f"Không đọc được trang truyện: {e}")
 
 @app.get("/api/chapter")
 async def chapter(url: str):
-    return await load_chapter(url)
+    from fetcher import normalize_url
+    url = normalize_url(url)
+    try:
+        return await load_chapter(url)
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    except Exception as e:
+        raise HTTPException(502, f"Không tải được chương: {e}")
+
+@app.get("/api/chapter/probe")
+async def chapter_probe(url: str):
+    """Check if a next/prev URL is readable before auto-advancing."""
+    from fetcher import normalize_url
+    url = normalize_url(url)
+    try:
+        ch = await load_chapter(url)
+        ok = bool(ch.get("text") or ch.get("chunks"))
+        return {"ok": ok, "url": url, "title": ch.get("title"), "chars": ch.get("chars", 0)}
+    except Exception as e:
+        return {"ok": False, "url": url, "error": str(getattr(e, "detail", e))}
 
 # ---------- Dịch ----------
 class TranslateReq(BaseModel):
@@ -160,8 +192,10 @@ class TTSReq(BaseModel):
 
 @app.post("/api/tts")
 async def tts(req: TTSReq, request: Request):
-    text = sanitize(req.text)
-    if len(text) < config.MIN_CHARS: text = text.ljust(config.MIN_CHARS)
+    from textutil import for_tts
+    text = for_tts(req.text)
+    if len(text) < config.MIN_CHARS:
+        text = (text + " " + ("." * (config.MIN_CHARS - len(text)))).strip()
     async def alive(): return not await request.is_disconnected()
     data, hit = await provider.cached(text, req.voice or config.DEFAULT_VOICE, alive)
     mime = "audio/mpeg" if provider.fmt == "mp3" else "audio/wav"

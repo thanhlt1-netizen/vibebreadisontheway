@@ -5,7 +5,9 @@ import asyncio
 import ipaddress
 import socket
 import time
+import re
 from urllib.parse import urlparse, urljoin
+
 
 import httpx
 from fastapi import HTTPException
@@ -24,6 +26,23 @@ UA = {
 MAX_BYTES = 5_000_000
 _CACHE: dict[str, tuple[float, str]] = {}
 TTL = 600
+
+def normalize_url(url: str) -> str:
+    """Strip tracking junk, force scheme, drop fragment."""
+    url = (url or "").strip()
+    if not url:
+        return url
+    if not re.match(r"^https?://", url, re.I):
+        url = "https://" + url.lstrip("/")
+    u = urlparse(url)
+    # drop common tracking query keys
+    from urllib.parse import parse_qsl, urlencode, urlunparse
+    q = [(k, v) for k, v in parse_qsl(u.query, keep_blank_values=True)
+         if k.lower() not in {"utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
+                              "fbclid", "gclid", "ref", "spm", "from"}]
+    return urlunparse((u.scheme.lower(), u.netloc.lower(), u.path or "/", "", urlencode(q), ""))
+
+
 
 _PW_OK: bool | None = None
 

@@ -41,8 +41,10 @@ async function setWake(on){try{if(on&&'wakeLock'in navigator){wakeLock=await nav
 const S={ch:null,chunks:[],i:0,playing:false,tok:0,novel:null,list:null,cd:null,cache:new Map(),ac:new Map(),local:true,ready:true,pf:false,resumable:false,pend:null,orig:false};
 const curTitle=()=>S.ch?.vi?.title||S.ch?.title||'';
 const readHash=(u,n)=>'#/read?url='+enc(u)+(n?'&novel='+enc(n):'');
-const nextUrl=()=>{const l=S.list,i=l?l.indexOf(S.ch?.url):-1;return i>=0?l[i+1]||null:S.ch?.next_url||null};
-const prevUrl=()=>{const l=S.list,i=l?l.indexOf(S.ch?.url):-1;return i>0?l[i-1]:i<0?S.ch?.prev_url||null:null};
+function listIndex(){const l=S.list,u=S.ch?.url;if(!l||!u)return-1;let i=l.indexOf(u);if(i>=0)return i;
+ try{const nu=normUrl(u);i=l.findIndex(x=>normUrl(x)===nu);return i}catch{return-1}}
+const nextUrl=()=>{const l=S.list,i=listIndex();if(i>=0)return l[i+1]||null;return S.ch?.next_url||null};
+const prevUrl=()=>{const l=S.list,i=listIndex();if(i>0)return l[i-1];if(i<0)return S.ch?.prev_url||null;return null};
 /* nút play morph: tam giác ⇄ hai thanh */
 const PLAY=[9,6,16,10,16,22,9,26,16,10,25,16,25,16,16,22],PAUSE=[8,6,13,6,13,26,8,26,19,6,24,6,24,26,19,26];
 const path=p=>{const a=PLAY.map((v,i)=>(v+(PAUSE[i]-v)*p).toFixed(2));return[0,8].map(k=>`M${a[k]} ${a[k+1]}L${a[k+2]} ${a[k+3]}L${a[k+4]} ${a[k+5]}L${a[k+6]} ${a[k+7]}Z`).join('')};
@@ -60,7 +62,7 @@ async function ttsPost(text,signal){
  if(!r.ok){let d='';try{const j=await r.json();d=typeof j.detail==='string'?j.detail:JSON.stringify(j.detail||j)}catch{try{d=await r.text()}catch{}}const err=new Error(d||('TTS HTTP '+r.status));err.status=r.status;throw err}
  return r.blob()
 }
-function fetchChunk(i){if(i<0||i>=S.chunks.length)return Promise.resolve(null);
+function fetchChunk(i){if(i<0||i>=S.chunks.length)return Promise.resolve(null);if(!S.chunks[i]||!String(S.chunks[i]).trim())return Promise.resolve(null);
  if(!S.cache.has(i)){const ac=new AbortController(),p=(async()=>{
   let last;
   for(let a=0;a<8;a++){
@@ -74,9 +76,9 @@ function fetchChunk(i){if(i<0||i>=S.chunks.length)return Promise.resolve(null);
   throw last||new Error('TTS timeout khi nạp model');
  })();p.catch(()=>{S.cache.delete(i);S.ac.delete(i)});S.cache.set(i,p);S.ac.set(i,ac)}return S.cache.get(i)}
 async function playAt(i){if(!S.chunks.length)return;cancelCd();const tok=++S.tok;S.i=Math.max(0,Math.min(i,S.chunks.length-1));
- for(const[k,v]of[...S.cache]){if(k<S.i-1){v.then(u=>u&&URL.revokeObjectURL(u),()=>{});S.cache.delete(k);S.ac.delete(k)}else if(k>S.i+WIN()){S.ac.get(k)?.abort();S.cache.delete(k);S.ac.delete(k)}}
+ for(const[k,v]of[...S.cache]){if(k<S.i-1){v.then(u=>u&&URL.revokeObjectURL(u),()=>{});S.cache.delete(k);S.ac.delete(k)}else if(k>S.i+WIN()+1){S.ac.get(k)?.abort();S.cache.delete(k);S.ac.delete(k)}}
  setPlaying(true);markActive();saveProgress();
- try{const src=await fetchChunk(S.i);if(tok!==S.tok)return;A.src=src;A.playbackRate=settings.speed;await A.play();if(tok!==S.tok)return;S.resumable=true;for(let k=1;k<=WIN();k++)fetchChunk(S.i+k);maybePrefetch()}
+ try{const src=await fetchChunk(S.i);if(tok!==S.tok)return;A.src=src;A.playbackRate=settings.speed;await A.play();if(tok!==S.tok)return;S.resumable=true;S._heardOk=true;S._retried=false;for(let k=1;k<=WIN();k++)fetchChunk(S.i+k);maybePrefetch()}
  catch(e){if(tok!==S.tok)return;
   if(e.name==='NotAllowedError'){setPlaying(false);toast('Nhấn ▶ để tiếp tục nghe');return}
   const msg=e.message||String(e);
@@ -87,8 +89,8 @@ async function playAt(i){if(!S.chunks.length)return;cancelCd();const tok=++S.tok
   S._retried=false;
   if(/thieu file|chua cai|chua san sang|model loi/i.test(msg) && !/os error 2/i.test(msg)){
    setPlaying(false);S.cache.delete(S.i);
-   toast(msg.slice(0,160)+' — mở Cài đặt → Tải gói giọng đọc');
-   try{openSheet()}catch{};return}
+   toast(msg.slice(0,140)+' — Cài đặt → Tải gói giọng đọc');
+   if(!S._heardOk)try{openSheet()}catch{};return}
   if(S.i+1<S.chunks.length){S.cache.delete(S.i);playAt(S.i+1)}
   else{setPlaying(false);toast(msg)}
  }}
@@ -97,7 +99,12 @@ function stopAudio(){S.tok++;A.pause();A.removeAttribute('src');S.resumable=fals
 A.onended=()=>{if(S.i+1<S.chunks.length){S._retried=false;playAt(S.i+1)}else chapterEnd()};
 A.ontimeupdate=()=>{if(S.playing&&!S.cd){const r=A.currentTime/(A.duration||1);ring((S.i+r)/S.chunks.length);if(r>.45){for(let k=1;k<=WIN();k++)fetchChunk(S.i+k);maybePrefetch()}}};
 function chapterEnd(){const n=nextUrl();saveProgress(true);if(!n){setPlaying(false);toast('Hết truyện — chưa có chương sau');return}
- S.cd={left:3};paint();ring(1);S.cd.t=setInterval(()=>{S.cd.left--;paint();if(S.cd.left<=0){cancelCd();gotoChapter(n,{autoplay:true,translate:!!S.ch.vi})}},1000)}
+ api('/api/chapter/probe?url='+enc(normUrl(n))).then(r=>r.json()).then(pr=>{
+  if(!pr.ok){setPlaying(false);toast('Chương sau không tồn tại hoặc không đọc được');return}
+  S.cd={left:3};paint();ring(1);S.cd.t=setInterval(()=>{S.cd.left--;paint();if(S.cd.left<=0){cancelCd();gotoChapter(normUrl(n),{autoplay:true,translate:!!S.ch.vi})}},1000)
+ }).catch(()=>{setPlaying(false);toast('Không kiểm tra được chương sau')})
+}
+
 function cancelCd(){if(S.cd){clearInterval(S.cd.t);S.cd=null;paint()}}
 function gotoChapter(u,o){S.pend=o||null;location.hash=readHash(u,S.novel)}
 function saveProgress(done){if(!S.ch?.url)return;idb.put('progress',{url:S.ch.url,title:curTitle(),novel:S.novel,novelTitle:S.novelTitle||'',chunk:done?S.chunks.length-1:S.i,total:S.chunks.length,t:Date.now()})}
@@ -105,7 +112,11 @@ function maybePrefetch(){const n=nextUrl();if(!settings.prefetch||S.pf||!n||S.i<
  api('/api/chapter?url='+enc(n)).then(r=>r.json()).then(c=>{c.url=n;idb.put('chapters',c);if(c.lang==='vi')post('/api/prefetch',{urls:[n],voice:settings.voice||undefined})}).catch(()=>{})}
 function setMedia(){if(!('mediaSession'in navigator))return;navigator.mediaSession.metadata=new MediaMetadata({title:curTitle(),artist:S.novelTitle||'VibeRead'});const h=(a,f)=>{try{navigator.mediaSession.setActionHandler(a,f)}catch{}};
  h('play',()=>{if(!S.playing)toggle()});h('pause',()=>{if(S.playing)toggle()});h('nexttrack',()=>step(1));h('previoustrack',()=>step(-1))}
-function step(d){const u=d>0?nextUrl():prevUrl();if(!u)return toast(d>0?'Chưa có chương sau':'Chưa có chương trước');gotoChapter(u,{autoplay:S.playing,translate:!!S.ch.vi})}
+async function step(d){const u=d>0?nextUrl():prevUrl();if(!u)return toast(d>0?'Chưa có chương sau':'Chưa có chương trước');
+ try{const pr=await(await api('/api/chapter/probe?url='+enc(normUrl(u)))).json();
+  if(!pr.ok){toast(d>0?'Chương sau không đọc được (link hỏng / hết chương)':'Chương trước không đọc được');cancelCd();return}
+ }catch{toast('Không kiểm tra được chương kế');return}
+ gotoChapter(normUrl(u),{autoplay:S.playing,translate:!!S.ch.vi})}
 
 /* ---------- Reader ---------- */
 function markActive(){$$('#text p.on').forEach(p=>p.classList.remove('on'));const p=$(`#text p[data-i="${S.i}"]`);if(p){p.classList.add('on');if(S.playing)p.scrollIntoView({block:'center',behavior:reduced?'auto':'smooth'})}}
@@ -121,8 +132,8 @@ async function translateChapter(play){const ch=S.ch;$('#b-tr')&&($('#b-tr').text
  try{const r=await post('/api/translate',{url:ch.url,novel_key:S.novel||ch.url},hdr);const j=await r.json();if(S.ch!==ch)return;
   ch.vi={title:j.title,chunks:j.chunks,original_chunks:j.original_chunks||[]};idb.put('chapters',ch);applyText(ch.vi);renderText();renderBanner();paint();setMedia();if(play)playAt(0)}
  catch(e){toast(e.message);renderBanner();if(/key/i.test(e.message))openSheet()}}
-async function openChapter(url,o={}){stopAudio();S.novel=o.novel||null;S.list=null;S.novelTitle='';S.orig=false;S.ch={url,loading:true};S.chunks=[];S.i=0;skeleton();paint();
- try{let ch=await idb.get('chapters',url);if(!ch||!ch.chunks)ch=await(await api('/api/chapter?url='+enc(url))).json();ch.url=url;idb.put('chapters',ch);if(S.ch?.url!==url)return;
+async function openChapter(url,o={}){url=normUrl(url);stopAudio();S.novel=o.novel||null;S.list=null;S.novelTitle='';S.orig=false;S.ch={url,loading:true};S.chunks=[];S.i=0;skeleton();paint();
+ try{let ch=await idb.get('chapters',url);if(!ch||!ch.chunks||!ch.chunks.length){ch=await(await api('/api/chapter?url='+enc(url))).json()}ch.url=url;idb.put('chapters',ch);if(S.ch?.url!==url)return;
   S.ch=ch;if(S.novel){const n=await idb.get('novels',S.novel);S.list=n?.chapters?.map(c=>c.url)||null;S.novelTitle=n?.title||''}
   $('#state').innerHTML='';
   if(ch.lang!=='vi'&&!ch.vi){applyText(ch);renderText();renderBanner();paint();setMedia();
@@ -143,7 +154,7 @@ async function openNovel(url){const head=$('#novel-head'),ol=$('#chapters');head
 async function renderRecent(){const all=((await idb.all('progress'))||[]).sort((a,b)=>b.t-a.t).slice(0,8),box=$('#recent');
  if(!all.length){box.innerHTML='<div class="empty"><i class="eq"><b></b><b></b><b></b><b></b></i><span>Chưa có gì để nghe. Dán link chương bạn đang đọc ở trên — app sẽ nhớ đến từng đoạn.</span></div>';return}
  box.replaceChildren(...all.map(p=>{const b=document.createElement('button');b.className='card';b.innerHTML=`<small>${esc(p.novelTitle||'Đang nghe')}</small><strong>${esc(p.title||p.url)}</strong><i style="transform:scaleX(${p.total?p.chunk/p.total:0})"></i>`;b.onclick=()=>go(readHash(p.url,p.novel));return b}))}
-$('#add').onsubmit=async e=>{e.preventDefault();const u=$('#url').value.trim(),b=$('#go');b.classList.add('busy');b.firstChild.textContent='…';
+$('#add').onsubmit=async e=>{e.preventDefault();const u=normUrl($('#url').value),b=$('#go');if(!u){toast('Nhập link truyện/chương');return;}b.classList.add('busy');b.firstChild.textContent='…';
  try{const r=await(await api('/api/resolve?url='+enc(u))).json();go((r.kind==='novel'?'#/novel?url=':'#/read?url=')+enc(u))}catch(e){toast(e.message)}finally{b.classList.remove('busy');b.firstChild.textContent='Nghe'}};
 
 /* ---------- Router ---------- */
