@@ -53,11 +53,35 @@ h1.ch{font-size:clamp(1.9rem,5vw,3.2rem);line-height:1.08;max-width:22ch;letter-
 .chlist{list-style:none;margin:0;padding:0;border-top:1px solid var(--line)}
 .chlist button{display:flex;width:100%;justify-content:space-between;gap:1rem;text-align:left;padding:.85rem .2rem;border-bottom:1px solid var(--line);transition:padding .35s var(--ease),color .2s}
 .chlist button:hover{padding-left:.9rem;color:var(--mint)}.chlist .done{color:var(--mute)}.chlist .cur span:last-child{color:var(--ember)}
-/* reader */
-#v-read{max-width:40rem;margin:0 auto}
-#text p{font:400 var(--fs)/var(--lh) var(--fr);margin:0 0 .5em;padding:.15em .7rem;margin-left:-.7rem;border-left:2px solid transparent;border-radius:2px;cursor:pointer;color:color-mix(in srgb,var(--fg) 62%,var(--ink));transition:color .5s,border-color .5s,background .5s;text-wrap:pretty}
+/* reader — feel like a real web novel page */
+#v-read{max-width:38rem;margin:0 auto}
+#v-read .ch{margin-bottom:1.2rem}
+#text.prose{margin:0 0 2.5rem}
+#text p{
+  font:400 var(--fs)/var(--lh) var(--fr);
+  margin:0 0 .85em;padding:.12em 0 .12em .85rem;margin-left:-.85rem;
+  border-left:2px solid transparent;border-radius:0 4px 4px 0;
+  cursor:pointer;color:color-mix(in srgb,var(--fg) 55%,var(--ink));
+  transition:color .45s,border-color .35s,background .45s,opacity .45s;
+  text-wrap:pretty
+}
 #text p:hover{color:var(--fg)}
-#text p.on{color:var(--fg);border-left-color:var(--mint);background:linear-gradient(90deg,color-mix(in srgb,var(--mint) 10%,transparent),transparent 70%)}
+/* đã qua: mờ nhẹ như trang đã lướt */
+#text p.past{color:color-mix(in srgb,var(--fg) 38%,var(--ink));opacity:.85}
+/* đang nghe: sáng + vạch mint — theo dõi như người đọc theo */
+#text p.on{
+  color:var(--fg);opacity:1;
+  border-left-color:var(--mint);
+  background:linear-gradient(90deg,color-mix(in srgb,var(--mint) 12%,transparent),transparent 75%)
+}
+/* sắp tới: vẫn đọc được khi cuộn tay */
+#text p.ahead{color:color-mix(in srgb,var(--fg) 72%,var(--ink))}
+body.listening #text p:not(.on):not(:hover){transition:color .6s}
+.ch-foot{display:flex;gap:.8rem;flex-wrap:wrap;justify-content:space-between;padding:1.5rem 0 2rem;border-top:1px solid var(--line);margin-top:.5rem}
+.foot-btn{flex:1;min-width:9rem;padding:1rem 1.1rem;border-radius:12px;border:1px solid var(--line);background:var(--panel);font:500 .95rem var(--fu);text-align:center;transition:transform .3s var(--ease),border-color .2s,background .2s}
+.foot-btn:hover{transform:translateY(-2px);border-color:var(--mint)}
+.foot-btn.hot{background:color-mix(in srgb,var(--mint) 18%,var(--panel));border-color:color-mix(in srgb,var(--mint) 45%,var(--line));color:var(--fg)}
+.foot-btn:disabled{opacity:.4;pointer-events:none;transform:none}
 #banner{display:flex;flex-wrap:wrap;gap:.8rem;align-items:center;justify-content:space-between;background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--ember);border-radius:8px;padding:.9rem 1rem;margin:0 0 2rem;font-size:.92rem}
 .pill{padding:.45rem .9rem;border-radius:999px;border:1px solid var(--line);background:var(--panel2);font-size:.85rem;font-weight:500;transition:transform .3s var(--ease),border-color .2s}
 .pill:hover{transform:translateY(-2px);border-color:var(--mint)}.pill.hot{background:var(--ember);color:#1a0e03;border-color:transparent}

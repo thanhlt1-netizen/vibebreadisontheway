@@ -1,4 +1,4 @@
-/* viberead-ui 0.4 */
+/* viberead-ui 0.5-human-read */
 'use strict';
 const $=(s,r=document)=>r.querySelector(s),$$=(s,r=document)=>[...r.querySelectorAll(s)],enc=encodeURIComponent;
 const reduced=matchMedia('(prefers-reduced-motion:reduce)').matches;
@@ -52,9 +52,15 @@ let mp=0,mt=0,mv=0,mr=0;$('#morph').setAttribute('d',path(0));
 function morphTo(t){mt=t;if(reduced){mp=t;$('#morph').setAttribute('d',path(t));return}if(!mr)mr=requestAnimationFrame(function s(){mv=(mv+(mt-mp)*.2)*.7;mp+=mv;$('#morph').setAttribute('d',path(mp));if(Math.abs(mt-mp)<.002&&Math.abs(mv)<.002){mp=mt;$('#morph').setAttribute('d',path(mp));mr=0}else mr=requestAnimationFrame(s)})}
 const C=169.65;const ring=p=>$('#ring').style.strokeDashoffset=C*(1-Math.max(0,Math.min(1,p)));
 function paint(){const n=S.chunks.length,d=$('#dock');d.hidden=!S.ch;$('#d-title').textContent=curTitle()||'—';
- if(S.cd){d.classList.add('cd');$('#d-sub').textContent=`Chương sau sau ${S.cd.left}s`;$('#stay').hidden=false}
- else{d.classList.remove('cd');$('#stay').hidden=true;$('#d-sub').textContent=S.playing&&!S.ready?'Đang nạp giọng đọc… (chỉ lần đầu)':n?`Đoạn ${S.i+1}/${n}${S.playing?'':' · tạm dừng'}`:'Đang tải…';
-  ring(n?(S.i+(A.duration&&S.playing?A.currentTime/A.duration:0))/n:0)}}
+ const pct=n?Math.min(100,Math.round(((S.i+(A.duration&&S.playing&&A.duration?A.currentTime/A.duration:0))/n)*100)):0;
+ if(S.cd){d.classList.add('cd');$('#d-sub').textContent=`Chuyển chương sau · ${S.cd.left}s`;$('#stay').hidden=false}
+ else{d.classList.remove('cd');$('#stay').hidden=true;
+  let sub='Đang mở chương…';
+  if(S.playing&&!S.ready)sub='Đang chuẩn bị giọng…';
+  else if(n)sub=S.playing?`Đang nghe · ${pct}%`:(S.resumable?`Tạm dừng · ${pct}%`:`Sẵn sàng · ${pct}%`);
+  $('#d-sub').textContent=sub;
+  ring(n?(S.i+(A.duration&&S.playing?A.currentTime/A.duration:0))/n:0)}
+ document.body.classList.toggle('listening',!!S.playing)}
 function setPlaying(b){S.playing=b;morphTo(b?1:0);$('#dock').classList.toggle('playing',b);if('mediaSession'in navigator)navigator.mediaSession.playbackState=b?'playing':'paused';setWake(b);paint()}
 const WIN=()=>S.local?2:1;
 async function ttsPost(text,signal){
@@ -98,9 +104,9 @@ function toggle(){if(S.cd){cancelCd();return}if(S.playing){A.pause();setPlaying(
 function stopAudio(){S.tok++;A.pause();A.removeAttribute('src');S.resumable=false;S.ac.forEach(a=>a.abort());S.ac.clear();S.cache.forEach(v=>v.then(u=>u&&URL.revokeObjectURL(u),()=>{}));S.cache.clear();cancelCd();S.pf=false;setPlaying(false)}
 A.onended=()=>{if(S.i+1<S.chunks.length){S._retried=false;playAt(S.i+1)}else chapterEnd()};
 A.ontimeupdate=()=>{if(S.playing&&!S.cd){const r=A.currentTime/(A.duration||1);ring((S.i+r)/S.chunks.length);if(r>.45){for(let k=1;k<=WIN();k++)fetchChunk(S.i+k);maybePrefetch()}}};
-function chapterEnd(){const n=nextUrl();saveProgress(true);if(!n){setPlaying(false);toast('Hết truyện — chưa có chương sau');return}
+function chapterEnd(){const n=nextUrl();saveProgress(true);if(!n){setPlaying(false);toast('Bạn đã hết chương trong danh sách');return}
  api('/api/chapter/probe?url='+enc(normUrl(n))).then(r=>r.json()).then(pr=>{
-  if(!pr.ok){setPlaying(false);toast('Chương sau không tồn tại hoặc không đọc được');return}
+  if(!pr.ok){setPlaying(false);toast('Chưa tìm thấy chương tiếp theo');return}
   S.cd={left:3};paint();ring(1);S.cd.t=setInterval(()=>{S.cd.left--;paint();if(S.cd.left<=0){cancelCd();gotoChapter(normUrl(n),{autoplay:true,translate:!!S.ch.vi})}},1000)
  }).catch(()=>{setPlaying(false);toast('Không kiểm tra được chương sau')})
 }
@@ -119,8 +125,14 @@ async function step(d){const u=d>0?nextUrl():prevUrl();if(!u)return toast(d>0?'C
  gotoChapter(normUrl(u),{autoplay:S.playing,translate:!!S.ch.vi})}
 
 /* ---------- Reader ---------- */
-function markActive(){$$('#text p.on').forEach(p=>p.classList.remove('on'));const p=$(`#text p[data-i="${S.i}"]`);if(p){p.classList.add('on');if(S.playing)p.scrollIntoView({block:'center',behavior:reduced?'auto':'smooth'})}}
-function renderText(){const src=S.orig&&S.ch.vi?S.ch.vi.original_chunks:S.chunks;$('#text').replaceChildren(...src.map((t,i)=>{const p=document.createElement('p');p.textContent=t;p.dataset.i=i;p.onclick=()=>{if(!(S.orig&&S.ch.vi))playAt(i)};return p}));markActive()}
+function markActive(){
+ $$('#text p').forEach(p=>{const i=+p.dataset.i;p.classList.toggle('on',i===S.i);p.classList.toggle('past',i<S.i);p.classList.toggle('ahead',i>S.i)});
+ const p=$(`#text p[data-i="${S.i}"]`);
+ if(p&&S.playing){const r=p.getBoundingClientRect(),vh=innerHeight;if(r.top<vh*.22||r.bottom>vh*.72)p.scrollIntoView({block:'center',behavior:reduced?'auto':'smooth'})}
+}
+function renderText(){const src=S.orig&&S.ch.vi?S.ch.vi.original_chunks:S.chunks;$('#text').replaceChildren(...src.map((t,i)=>{const p=document.createElement('p');p.textContent=t;p.dataset.i=i;p.onclick=()=>{if(!(S.orig&&S.ch.vi))playAt(i)};return p}));markActive();renderFoot()}
+function renderFoot(){const f=$('#ch-foot');if(!f||!S.ch)return;const hasP=!!prevUrl(),hasN=!!nextUrl();f.hidden=!hasP&&!hasN;
+ const bp=$('#foot-prev'),bn=$('#foot-next');if(bp){bp.disabled=!hasP;bp.onclick=()=>step(-1)}if(bn){bn.disabled=!hasN;bn.onclick=()=>step(1)}}
 function renderBanner(){const b=$('#banner'),ch=S.ch;if(!ch||ch.loading||ch.lang==='vi'){b.hidden=true;return}b.hidden=false;
  const L={zh:'tiếng Trung',ja:'tiếng Nhật',ko:'tiếng Hàn',en:'tiếng Anh'}[ch.lang]||ch.lang;
  b.innerHTML=ch.vi?`<span>Đã dịch từ ${L}.</span><button class="pill" id="b-orig">${S.orig?'Xem bản dịch':'Xem bản gốc'}</button>`:`<span>Chương này viết bằng ${L}. Dịch sang tiếng Việt để nghe.</span><button class="pill hot" id="b-tr">Dịch &amp; nghe</button>`;
@@ -200,11 +212,11 @@ function updateModelUI(h){
 }
 async function pollTTS(){try{const h=await(await api('/api/health')).json(),c=$('#tts-chip');S.local=h.tts!=='cloud';
  updateModelUI(h);
- if(h.tts_downloading){S.ready=false;c.hidden=false;c.className='chip';c.textContent='Đang tải model…';setTimeout(pollTTS,2000);paint();return}
- if(h.tts_error){S.ready=false;c.hidden=false;c.className='chip';c.textContent='Giọng đọc lỗi — mở Cài đặt để tải model';toast('VieNeu: '+h.tts_error);paint();return}
+ if(h.tts_downloading){S.ready=false;c.hidden=false;c.className='chip';c.textContent='Đang tải giọng đọc…';setTimeout(pollTTS,2000);paint();return}
+ if(h.tts_error){S.ready=false;c.hidden=false;c.className='chip';c.textContent='Chưa có giọng — mở Cài đặt';toast('VieNeu: '+h.tts_error);paint();return}
  S.ready=h.tts_ready;c.hidden=false;
- if(!h.tts_ready){c.className='chip';c.textContent='Đang nạp giọng đọc…';setTimeout(pollTTS,1500)}
- else{c.className='chip ok';c.textContent='Giọng sẵn sàng';setTimeout(()=>c.hidden=true,2500)}paint()}catch{setTimeout(pollTTS,3000)}}
+ if(!h.tts_ready){c.className='chip';c.textContent='Đang chuẩn bị giọng…';setTimeout(pollTTS,1500)}
+ else{c.className='chip ok';c.textContent='Sẵn sàng nghe';setTimeout(()=>c.hidden=true,2500)}paint()}catch{setTimeout(pollTTS,3000)}}
 pollTTS();
 
 $('#s-dl-model')?.addEventListener('click',async()=>{
