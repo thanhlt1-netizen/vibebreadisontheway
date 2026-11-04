@@ -281,7 +281,8 @@ class SDKProvider(Provider):
                     pass
 
     def _infer_once(self, tts, text, voice):
-        audio = tts.infer(text, voice=voice)
+        from textutil import for_tts
+        audio = tts.infer(for_tts(text), voice=voice)
         return self._audio_to_wav_bytes(tts, audio)
 
     def _infer(self, text, voice):

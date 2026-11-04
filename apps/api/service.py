@@ -1,4 +1,4 @@
-import asyncio, dataclasses, uuid
+import asyncio, dataclasses, time, uuid
 from fastapi import HTTPException
 import config
 from chunker import chunk_text
@@ -7,7 +7,17 @@ from parsers.registry import pick
 from textutil import sanitize, detect_lang
 from tts.providers import provider
 
-async def load_chapter(url: str) -> dict:
+# In-process chapter cache (parsed + chunked) — big win when reopening / prefetch
+_CH_CACHE: dict[str, tuple[float, dict]] = {}
+_CH_TTL = 900  # 15 min
+
+
+async def load_chapter(url: str, *, bypass_cache: bool = False) -> dict:
+    now = time.time()
+    if not bypass_cache:
+        hit = _CH_CACHE.get(url)
+        if hit and now - hit[0] < _CH_TTL:
+            return hit[1]
     try:
         c = await pick(url).get_chapter(url, await fetch(url))
     except ValueError as e:
@@ -17,6 +27,9 @@ async def load_chapter(url: str) -> dict:
     d["lang"] = detect_lang(d["text"])
     d["chunks"] = chunk_text(d["text"])
     d["chars"] = len(d["text"])
+    if len(_CH_CACHE) > 80:
+        _CH_CACHE.pop(next(iter(_CH_CACHE)))
+    _CH_CACHE[url] = (now, d)
     return d
 
 JOBS: dict[str, dict] = {}

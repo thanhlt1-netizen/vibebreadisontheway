@@ -1,28 +1,74 @@
+"""Split chapter text into TTS-friendly segments."""
+from __future__ import annotations
+
 import re
 from config import MIN_CHARS
 
-def chunk_text(text: str, max_len: int = 480, min_len: int = MIN_CHARS, first_max: int = 90) -> list[str]:
-    """Tách theo câu. first_max nhỏ → nghe sớm; max_len lớn hơn → ít request TTS hơn."""
+
+def chunk_text(
+    text: str,
+    max_len: int = 420,
+    min_len: int = MIN_CHARS,
+    first_max: int = 85,
+) -> list[str]:
+    """
+    Sentence-aware chunking optimized for local TTS:
+    - Short first segment → low time-to-first-audio
+    - Body ~420 chars → fewer engine calls
+    - Merge micro-fragments so engine never gets tiny strings
+    """
+    if not text or not text.strip():
+        return []
+
     out: list[str] = []
+    sent_re = re.compile(
+        r"[^.!?…。！？]+(?:[.!?…。！？]+[\"”')\]]*)?\s*|[.!?…。！？]+",
+        re.U,
+    )
+
     for para in text.split("\n"):
         para = para.strip()
-        if not para: continue
+        if not para:
+            continue
         buf = ""
-        for s in re.findall(r"[^.!?…]+[.!?…]*[\"”')\]]*\s*|[.!?…]+", para) or [para]:
-            while len(s) > max_len:                       # câu quá dài: cắt ở dấu phẩy/khoảng trắng
-                cut = max(s.rfind(",", 0, max_len), s.rfind(" ", 0, max_len), max_len // 2)
-                out.append((buf + s[:cut + 1]).strip()); buf, s = "", s[cut + 1:]
-            if len(buf) + len(s) > max_len and buf:
-                out.append(buf.strip()); buf = ""
-            buf += s
-        if buf.strip(): out.append(buf.strip())
+        parts = sent_re.findall(para) or [para]
+        for s in parts:
+            s = s.strip()
+            if not s:
+                continue
+            while len(s) > max_len:
+                cut = max(
+                    s.rfind("，", 0, max_len),
+                    s.rfind(",", 0, max_len),
+                    s.rfind("、", 0, max_len),
+                    s.rfind(" ", 0, max_len),
+                    max_len // 2,
+                )
+                piece = (buf + s[: cut + 1]).strip()
+                if piece:
+                    out.append(piece)
+                buf, s = "", s[cut + 1 :].lstrip()
+            if buf and len(buf) + 1 + len(s) > max_len:
+                out.append(buf.strip())
+                buf = s
+            else:
+                buf = (buf + " " + s).strip() if buf else s
+        if buf.strip():
+            out.append(buf.strip())
+
     merged: list[str] = []
-    for c in out:                                        # gộp đoạn ngắn vào đoạn trước/sau
-        if merged and (len(merged[-1]) < min_len or len(c) < min_len) and len(merged[-1]) + len(c) < max_len * 1.5:
-            merged[-1] += " " + c
+    for c in out:
+        if (
+            merged
+            and (len(merged[-1]) < min_len or len(c) < min_len)
+            and len(merged[-1]) + len(c) + 1 <= int(max_len * 1.35)
+        ):
+            merged[-1] = (merged[-1] + " " + c).strip()
         else:
             merged.append(c)
-    if first_max and merged and len(merged[0]) > first_max * 1.5:   # đoạn đầu ngắn → nghe được sớm
-        merged[0:1] = chunk_text(merged[0], first_max, min_len, first_max=0)
-    # Drop empty / tiny noise chunks that make some engines throw
+
+    if first_max and merged and len(merged[0]) > int(first_max * 1.35):
+        head = chunk_text(merged[0], first_max, max(8, min_len // 2), first_max=0)
+        merged = head + merged[1:]
+
     return [c for c in merged if c and len(c.strip()) >= 2]

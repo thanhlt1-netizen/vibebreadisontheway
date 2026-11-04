@@ -1,3 +1,4 @@
+/* viberead-ui 0.4 */
 'use strict';
 const $=(s,r=document)=>r.querySelector(s),$$=(s,r=document)=>[...r.querySelectorAll(s)],enc=encodeURIComponent;
 const reduced=matchMedia('(prefers-reduced-motion:reduce)').matches;
@@ -34,7 +35,9 @@ const hero=(()=>{let R,scene,cam,mesh,pts,raf=0,on=false,mx=0,my=0,sx=0,sy=0,U,t
 document.addEventListener('visibilitychange',()=>hero.active(document.body.classList.contains('home')));
 
 /* ---------- State & player ---------- */
-const A=new Audio();A.preservesPitch=true;
+const A=new Audio();A.preservesPitch=true;A.preload='auto';
+let wakeLock=null;
+async function setWake(on){try{if(on&&'wakeLock'in navigator){wakeLock=await navigator.wakeLock.request('screen')}else if(wakeLock){await wakeLock.release();wakeLock=null}}catch{}}
 const S={ch:null,chunks:[],i:0,playing:false,tok:0,novel:null,list:null,cd:null,cache:new Map(),ac:new Map(),local:true,ready:true,pf:false,resumable:false,pend:null,orig:false};
 const curTitle=()=>S.ch?.vi?.title||S.ch?.title||'';
 const readHash=(u,n)=>'#/read?url='+enc(u)+(n?'&novel='+enc(n):'');
@@ -50,7 +53,7 @@ function paint(){const n=S.chunks.length,d=$('#dock');d.hidden=!S.ch;$('#d-title
  if(S.cd){d.classList.add('cd');$('#d-sub').textContent=`Chương sau sau ${S.cd.left}s`;$('#stay').hidden=false}
  else{d.classList.remove('cd');$('#stay').hidden=true;$('#d-sub').textContent=S.playing&&!S.ready?'Đang nạp giọng đọc… (chỉ lần đầu)':n?`Đoạn ${S.i+1}/${n}${S.playing?'':' · tạm dừng'}`:'Đang tải…';
   ring(n?(S.i+(A.duration&&S.playing?A.currentTime/A.duration:0))/n:0)}}
-function setPlaying(b){S.playing=b;morphTo(b?1:0);$('#dock').classList.toggle('playing',b);if('mediaSession'in navigator)navigator.mediaSession.playbackState=b?'playing':'paused';paint()}
+function setPlaying(b){S.playing=b;morphTo(b?1:0);$('#dock').classList.toggle('playing',b);if('mediaSession'in navigator)navigator.mediaSession.playbackState=b?'playing':'paused';setWake(b);paint()}
 const WIN=()=>S.local?2:1;
 async function ttsPost(text,signal){
  const r=await api('/api/tts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,voice:settings.voice||undefined}),signal});
@@ -86,13 +89,13 @@ async function playAt(i){if(!S.chunks.length)return;cancelCd();const tok=++S.tok
    setPlaying(false);S.cache.delete(S.i);
    toast(msg.slice(0,160)+' — mở Cài đặt → Tải gói giọng đọc');
    try{openSheet()}catch{};return}
-  if(S.i+1<S.chunks.length){toast('Đoạn '+(S.i+1)+' lỗi, bỏ qua');S.cache.delete(S.i);playAt(S.i+1)}
+  if(S.i+1<S.chunks.length){S.cache.delete(S.i);playAt(S.i+1)}
   else{setPlaying(false);toast(msg)}
  }}
 function toggle(){if(S.cd){cancelCd();return}if(S.playing){A.pause();setPlaying(false)}else if(S.resumable&&A.src&&!A.ended){A.play().then(()=>setPlaying(true)).catch(e=>toast(e.message))}else playAt(S.i)}
 function stopAudio(){S.tok++;A.pause();A.removeAttribute('src');S.resumable=false;S.ac.forEach(a=>a.abort());S.ac.clear();S.cache.forEach(v=>v.then(u=>u&&URL.revokeObjectURL(u),()=>{}));S.cache.clear();cancelCd();S.pf=false;setPlaying(false)}
-A.onended=()=>S.i+1<S.chunks.length?playAt(S.i+1):chapterEnd();
-A.ontimeupdate=()=>{if(S.playing&&!S.cd)ring((S.i+(A.currentTime/(A.duration||1)))/S.chunks.length)};
+A.onended=()=>{if(S.i+1<S.chunks.length){S._retried=false;playAt(S.i+1)}else chapterEnd()};
+A.ontimeupdate=()=>{if(S.playing&&!S.cd){const r=A.currentTime/(A.duration||1);ring((S.i+r)/S.chunks.length);if(r>.45){for(let k=1;k<=WIN();k++)fetchChunk(S.i+k);maybePrefetch()}}};
 function chapterEnd(){const n=nextUrl();saveProgress(true);if(!n){setPlaying(false);toast('Hết truyện — chưa có chương sau');return}
  S.cd={left:3};paint();ring(1);S.cd.t=setInterval(()=>{S.cd.left--;paint();if(S.cd.left<=0){cancelCd();gotoChapter(n,{autoplay:true,translate:!!S.ch.vi})}},1000)}
 function cancelCd(){if(S.cd){clearInterval(S.cd.t);S.cd=null;paint()}}

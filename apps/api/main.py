@@ -15,9 +15,20 @@ from textutil import CUES, detect_lang, sanitize
 from translate import translate
 from tts.providers import provider
 
-app = FastAPI(title="VibeRead API", version="0.3")
+app = FastAPI(title="VibeRead API", version="0.4")
 app.add_middleware(CORSMiddleware, allow_origins=config.CORS, allow_methods=["*"], allow_headers=["*"],
                    expose_headers=["X-Cache", "X-Sample-Rate"])
+
+@app.middleware("http")
+async def _cache_static(request: Request, call_next):
+    resp = await call_next(request)
+    path = request.url.path
+    if path.startswith("/assets") or path.endswith((".js", ".css", ".svg", ".webmanifest")):
+        resp.headers.setdefault("Cache-Control", "public, max-age=3600")
+    elif path.startswith("/api/"):
+        resp.headers.setdefault("Cache-Control", "no-store")
+    return resp
+
 
 @app.on_event("startup")
 async def _warm():
