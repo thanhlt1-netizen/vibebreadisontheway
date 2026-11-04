@@ -1,4 +1,4 @@
-/* viberead-ui 0.5-human-read */
+/* viberead-ui 0.6-bubble-morph */
 'use strict';
 const $=(s,r=document)=>r.querySelector(s),$$=(s,r=document)=>[...r.querySelectorAll(s)],enc=encodeURIComponent;
 const reduced=matchMedia('(prefers-reduced-motion:reduce)').matches;
@@ -218,6 +218,25 @@ async function pollTTS(){try{const h=await(await api('/api/health')).json(),c=$(
  if(!h.tts_ready){c.className='chip';c.textContent='Đang chuẩn bị giọng…';setTimeout(pollTTS,1500)}
  else{c.className='chip ok';c.textContent='Sẵn sàng nghe';setTimeout(()=>c.hidden=true,2500)}paint()}catch{setTimeout(pollTTS,3000)}}
 pollTTS();
+
+/* Bubble morph: pointer glow + stagger delays */
+(function blobPointer(){
+  const sel='.bubble,.ic,.pill,#go,.foot-btn,.ringbtn,.btn-dl,.seg button';
+  const set=e=>{
+    const el=e.currentTarget,r=el.getBoundingClientRect();
+    el.style.setProperty('--mx',((e.clientX-r.left)/r.width*100).toFixed(1)+'%');
+    el.style.setProperty('--my',((e.clientY-r.top)/r.height*100).toFixed(1)+'%');
+  };
+  const bind=()=>document.querySelectorAll(sel).forEach((el,i)=>{
+    if(el.dataset.blob)return;el.dataset.blob='1';
+    el.style.setProperty('--d',String(i%7));
+    el.classList.add('bubble');
+    el.addEventListener('pointermove',set,{passive:true});
+  });
+  bind();
+  new MutationObserver(bind).observe(document.body,{childList:true,subtree:true});
+})();
+
 
 $('#s-dl-model')?.addEventListener('click',async()=>{
  const btn=$('#s-dl-model');btn.disabled=true;btn.classList.add('busy');btn.textContent='Đang tải…';

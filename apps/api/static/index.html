@@ -25,7 +25,7 @@
     <h1 class="st" style="--i:1">Nghe truyện<br><em>đúng vibe.</em></h1>
     <form id="add" class="st" style="--i:2" autocomplete="off">
       <input id="url" type="url" inputmode="url" placeholder="Dán link truyện hoặc link chương đang đọc" aria-label="Link truyện" required>
-      <button id="go"><span>Nghe</span></button>
+      <button id="go" class="bubble"><span>Nghe</span></button>
     </form>
     <p class="hint st" style="--i:3">Dán link → app tự nhận diện → đọc bằng giọng Việt → hết chương tự sang chương sau.</p>
     <section class="recent st" style="--i:4"><h2>Đang nghe dở</h2><div id="recent"></div></section>
@@ -42,8 +42,8 @@
     <article id="text" class="prose" aria-live="off"></article>
     <div id="state"></div>
     <nav id="ch-foot" class="ch-foot" hidden>
-      <button type="button" id="foot-prev" class="foot-btn">← Chương trước</button>
-      <button type="button" id="foot-next" class="foot-btn hot">Chương sau →</button>
+      <button type="button" id="foot-prev" class="foot-btn bubble">← Chương trước</button>
+      <button type="button" id="foot-next" class="foot-btn hot bubble">Chương sau →</button>
     </nav>
   </section>
 </main>
@@ -55,11 +55,11 @@
     </button>
     <button id="meta" class="meta"><strong id="d-title">—</strong><span id="d-sub"></span></button>
     <i class="eq big" aria-hidden="true"><b></b><b></b><b></b><b></b></i>
-    <button id="stay" class="pill" hidden>Ở lại</button>
+    <button id="stay" class="pill bubble" hidden>Ở lại</button>
     <div class="ctl">
       <button id="prev" class="ic" aria-label="Chương trước"><svg viewBox="0 0 24 24"><path d="M6 5v14M19 5l-9 7 9 7z"/></svg></button>
       <button id="next" class="ic" aria-label="Chương sau"><svg viewBox="0 0 24 24"><path d="M18 5v14M5 5l9 7-9 7z"/></svg></button>
-      <button id="speed" class="pill">1x</button>
+      <button id="speed" class="pill bubble">1x</button>
     </div>
   </div>
 </footer>
@@ -74,7 +74,7 @@
     <label>Giọng đọc<select id="s-voice"><option value="">Mặc định</option></select></label>
     <div class="model-box">
       <p class="hint" id="s-model-status">Model giọng đọc: đang kiểm tra…</p>
-      <button type="button" id="s-dl-model" class="btn-dl">Tải gói giọng đọc</button>
+      <button type="button" id="s-dl-model" class="btn-dl bubble">Tải gói giọng đọc</button>
       <p class="hint">Dùng khi cài bản không kèm model, hoặc model bị lỗi. Cần mạng, có thể vài phút (~vài trăm MB).</p>
     </div>
     <label class="row">Tải trước chương sau<input id="s-pf" type="checkbox"></label>
