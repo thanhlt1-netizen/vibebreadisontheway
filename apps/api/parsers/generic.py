@@ -1,41 +1,48 @@
 """
-GenericParser — heuristic mạnh để đọc đa số trang truyện / tiểu thuyết / văn bản.
-Không phụ thuộc domain cụ thể; domain-specific parser (nếu có) vẫn được ưu tiên trong registry.
+GenericParser — “nhìn trang như người đọc”.
+
+Người thật trên web novel:
+1. Tìm khối chữ dài ở giữa trang (không phải menu / quảng cáo / list chương).
+2. Đọc từ trên xuống dưới trong khối đó.
+3. Tìm nút “Chương sau / Chương trước” thường nằm sát trên hoặc dưới khối chữ.
+4. Nếu không thấy nút, đôi khi đoán từ số trong URL (…/chuong-12 → …/chuong-13).
+
+Parser này mô phỏng các bước đó thay vì chỉ match CSS máy móc.
 """
 from __future__ import annotations
 
 import re
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlparse, urlunparse
 from lxml import html as lh
 from .base import SourceParser, Chapter, Novel, ChapterRef
 
-# ---------- Noise & navigation patterns ----------
+# ---------- Noise ----------
 NOISE = re.compile(
     r"(quảng\s*cáo|đọc\s*truyện\s*(tại|online)|donate|facebook|twitter|telegram|"
     r"nguồn\s*:|translator|editor|ads?\b|copyright|bản\s*quyền|"
     r"please\s*enable\s*javascript|turn\s*off\s*ad\s*block|"
     r"subscribe|đăng\s*ký|theo\s*dõi|share\s*this|chia\s*sẻ|"
-    r"related\s*(stories|chapters)|truyện\s*cùng\s*tác\s*giả)",
+    r"related\s*(stories|chapters)|truyện\s*cùng\s*tác\s*giả|"
+    r"mục\s*lục|table\s*of\s*contents|danh\s*sách\s*chương)",
     re.I,
 )
 
 NEXT_RE = re.compile(
-    r"(chương\s*sau|chap\s*sau|chapter\s*next|next\s*(chapter|chap|page)?|"
-    r"tiếp\s*(theo)?|›|»|→|next\b|sau\b)",
+    r"(chương\s*sau|chap(?:ter)?\s*sau|next\s*(?:chapter|chap|page)?|"
+    r"tiếp(?:\s*theo)?|›|»|→|\bnext\b)",
     re.I,
 )
 PREV_RE = re.compile(
-    r"(chương\s*trước|chap\s*trước|chapter\s*prev|prev(ious)?\s*(chapter|chap|page)?|"
-    r"trước|‹|«|←|prev\b)",
+    r"(chương\s*trước|chap(?:ter)?\s*trước|prev(?:ious)?\s*(?:chapter|chap|page)?|"
+    r"‹|«|←|\bprev\b|trước)",
     re.I,
 )
 
-# Tiêu đề chương / link danh sách
 CHAPTER_TITLE_RE = re.compile(
     r"^(?:"
     r"chương|chuong|chapter|chap|tập|tap|episode|ep|part|phần|phan|"
     r"quyển|quyen|volume|vol|arc|"
-    r"第\s*\d+\s*[章节回話话]|"          # 第1章 / 第12話
+    r"第\s*\d+\s*[章节回話话]|"
     r"第\s*[一二三四五六七八九十百千零〇两兩]+\s*[章节回話话]"
     r")"
     r"[\s\-_:：.]*\d*",
@@ -47,45 +54,20 @@ CHAPTER_URL_RE = re.compile(
     re.I,
 )
 
-# CSS/id hay gặp trên site truyện
+# Selectors hay gặp — chỉ là gợi ý, vẫn chấm điểm như khối khác
 CONTENT_SELECTORS = [
-    # id
-    "//*[@id='chapter-content']",
-    "//*[@id='chapter_content']",
-    "//*[@id='chapterContent']",
-    "//*[@id='content']",
-    "//*[@id='novel-content']",
-    "//*[@id='novel_content']",
-    "//*[@id='book-content']",
-    "//*[@id='booktext']",
-    "//*[@id='content-text']",
-    "//*[@id='reading-content']",
-    "//*[@id='chr-content']",
-    "//*[@id='chapterText']",
-    "//*[@id='story-content']",
-    "//*[@id='main-content']",
-    # class (contains)
-    "//*[contains(@class,'chapter-content')]",
-    "//*[contains(@class,'chapter_content')]",
-    "//*[contains(@class,'chapterContent')]",
-    "//*[contains(@class,'novel-content')]",
-    "//*[contains(@class,'novel_content')]",
-    "//*[contains(@class,'book-content')]",
-    "//*[contains(@class,'reading-content')]",
-    "//*[contains(@class,'content-text')]",
-    "//*[contains(@class,'chr-content')]",
-    "//*[contains(@class,'story-content')]",
-    "//*[contains(@class,'entry-content')]",
-    "//*[contains(@class,'post-content')]",
-    "//*[contains(@class,'article-content')]",
-    "//*[contains(@class,'text-left')]",
-    "//*[contains(@class,'box-chap')]",
-    "//*[contains(@class,'chapter-c')]",
+    "//*[@id='chapter-content' or @id='chapter_content' or @id='chapterContent' or @id='chapter-c']",
+    "//*[@id='chr-content' or @id='chapterText' or @id='booktext' or @id='content-text']",
+    "//*[@id='novel-content' or @id='novel_content' or @id='reading-content' or @id='story-content']",
+    "//*[@id='content' or @id='main-content' or @id='book-content']",
+    "//*[contains(@class,'chapter-content') or contains(@class,'chapter_content') or contains(@class,'chapter-c')]",
+    "//*[contains(@class,'box-chap') or contains(@class,'chr-content') or contains(@class,'reading-content')]",
+    "//*[contains(@class,'novel-content') or contains(@class,'entry-content') or contains(@class,'post-content')]",
+    "//*[contains(@class,'article-content') or contains(@class,'story-content') or contains(@class,'text-left')]",
     "//article",
     "//*[contains(@class,'content') and (self::div or self::section)]",
 ]
 
-# Thẻ / class thường là rác
 NOISE_XPATH = (
     "//script|//style|//nav|//header|//footer|//aside|//iframe|//form|"
     "//noscript|//svg|//button|"
@@ -94,159 +76,352 @@ NOISE_XPATH = (
     "contains(@class,'share') or contains(@class,'social') or contains(@class,'comment') or "
     "contains(@class,'related') or contains(@class,'recommend') or contains(@class,'sidebar') or "
     "contains(@class,'menu') or contains(@class,'nav') or contains(@class,'breadcrumb') or "
-    "contains(@id,'ad') or contains(@id,'ads') or contains(@id,'banner')]"
+    "contains(@class,'pagination') or contains(@class,'pager') or "
+    "contains(@id,'ad') or contains(@id,'ads') or contains(@id,'banner') or "
+    "contains(@id,'comment') or contains(@id,'footer') or contains(@id,'header')]"
 )
+
+# Số chương trong path/query
+_CH_NUM = re.compile(
+    r"(?:chuong|chapter|chap|episode|ep|part|tập|tap|/c)[-_/\.]?(\d{1,5})",
+    re.I,
+)
+_TRAIL_NUM = re.compile(r"(\d{1,5})(?:\.html?)?/?$", re.I)
 
 
 def _clean(tree) -> None:
     for bad in tree.xpath(NOISE_XPATH):
         parent = bad.getparent()
         if parent is not None:
-            parent.remove(bad)
+            try:
+                parent.remove(bad)
+            except Exception:
+                pass
 
 
 def _text_len(el) -> int:
     return len(" ".join(t.strip() for t in el.xpath(".//text()") if t and t.strip()))
 
 
+def _same_page(a: str, b: str) -> bool:
+    pa, pb = urlparse(a), urlparse(b)
+    return (pa.netloc.lower().removeprefix("www."), pa.path.rstrip("/").lower()) == (
+        pb.netloc.lower().removeprefix("www."),
+        pb.path.rstrip("/").lower(),
+    )
+
+
+def _same_host(a: str, b: str) -> bool:
+    return urlparse(a).netloc.lower().removeprefix("www.") == urlparse(b).netloc.lower().removeprefix(
+        "www."
+    )
+
+
 def _paragraph_score(el) -> float:
-    """Điểm readability-ish: ưu tiên khối có nhiều chữ, nhiều <p>, ít link."""
+    """
+    Giống mắt người: khối “đáng đọc” có nhiều chữ liên tục, nhiều đoạn,
+    ít link (không phải mục lục), không nằm trong menu.
+    """
     texts = [t.strip() for t in el.xpath(".//text()") if t and t.strip()]
     full = " ".join(texts)
     n = len(full)
-    if n < 80:
+    if n < 100:
         return 0.0
+
     p_count = len(el.xpath(".//p"))
     br_count = len(el.xpath(".//br"))
-    link_text = len(" ".join(a.text_content() or "" for a in el.xpath(".//a")))
+    links = el.xpath(".//a[@href]")
+    link_text = sum(len((a.text_content() or "").strip()) for a in links)
     link_ratio = link_text / max(n, 1)
-    # phạt nếu gần như toàn link (TOC)
-    if link_ratio > 0.45:
-        return n * 0.15
-    score = n + p_count * 120 + br_count * 25
-    score *= max(0.2, 1.0 - link_ratio * 1.5)
+
+    # TOC / list chương: rất nhiều link ngắn
+    if link_ratio > 0.4 or (len(links) > 12 and n / max(len(links), 1) < 40):
+        return n * 0.08
+
+    # Trung bình độ dài “câu/đoạn” — văn xuôi thật dài hơn menu
+    chunks = [t for t in texts if len(t) > 20]
+    avg = (sum(map(len, chunks)) / len(chunks)) if chunks else 0
+
+    score = n * 1.0 + p_count * 140 + br_count * 20 + avg * 8
+    score *= max(0.15, 1.0 - link_ratio * 1.8)
+
+    # Thưởng id/class gợi ý nội dung chương
+    blob = f"{el.get('id') or ''} {el.get('class') or ''}".lower()
+    if any(
+        k in blob
+        for k in (
+            "chapter",
+            "chuong",
+            "content",
+            "reading",
+            "novel",
+            "booktext",
+            "chr-content",
+            "box-chap",
+            "entry-content",
+            "post-content",
+        )
+    ):
+        score *= 1.35
+    if any(k in blob for k in ("sidebar", "menu", "nav", "footer", "header", "comment", "related")):
+        score *= 0.25
+
+    tag = (el.tag or "").lower()
+    if tag in ("article", "main"):
+        score *= 1.15
+
     return score
 
 
 def _best_block(tree):
-    """1) Thử selector phổ biến  2) Fallback heuristic trên div/article/section."""
+    """1) Selector phổ biến  2) Mọi div/article/section — chọn điểm cao nhất."""
     candidates = []
     for sel in CONTENT_SELECTORS:
         try:
-            for el in tree.xpath(sel):
-                candidates.append(el)
+            candidates.extend(tree.xpath(sel))
         except Exception:
             continue
+    try:
+        candidates.extend(tree.xpath("//article|//main|//div|//section"))
+    except Exception:
+        pass
 
     best, best_score = None, 0.0
-    seen = set()
+    seen: set[int] = set()
     for el in candidates:
-        if id(el) in seen:
+        i = id(el)
+        if i in seen:
             continue
-        seen.add(id(el))
+        seen.add(i)
+        # Bỏ node quá nông (html/body) — người không đọc cả trang
+        tag = (getattr(el, "tag", "") or "").lower()
+        if tag in ("html", "body"):
+            continue
         s = _paragraph_score(el)
         if s > best_score:
             best, best_score = el, s
-
-    if best is not None and best_score >= 200:
-        return best
-
-    # Fallback: mọi div/article/section
-    for el in tree.xpath("//article|//section|//div"):
-        s = _paragraph_score(el)
-        if s > best_score:
-            best, best_score = el, s
-
-    return best if best_score >= 120 else None
+    return best
 
 
 def _extract_text(block) -> str:
-    """Lấy text có xuống dòng từ <p>, <br>, block elements."""
-    for br in block.xpath(".//br"):
-        br.tail = "\n" + (br.tail or "")
+    """Lấy chữ theo thứ tự đọc: p / br / dòng — bỏ dòng nhiễu."""
+    if block is None:
+        return ""
+    lines: list[str] = []
 
-    # Ưu tiên từng <p>
-    paras = []
-    p_nodes = block.xpath(".//p")
-    if len(p_nodes) >= 2:
-        for p in p_nodes:
-            t = " ".join(x.strip() for x in p.xpath(".//text()") if x and x.strip())
-            t = re.sub(r"\s+", " ", t).strip()
-            if t and not NOISE.search(t):
-                paras.append(t)
-        if paras:
-            return "\n".join(paras)
+    # Ưu tiên <p>
+    paras = block.xpath(".//p")
+    if paras and sum(_text_len(p) for p in paras) > 80:
+        for p in paras:
+            t = re.sub(r"[ \t\u00a0]+", " ", (p.text_content() or "")).strip()
+            if not t or len(t) < 2 or NOISE.search(t):
+                continue
+            lines.append(t)
+        if lines:
+            return "\n".join(lines)
 
-    # Fallback: text_content + split dòng
+    # Fallback: text_content theo dòng
     raw = block.text_content() or ""
-    lines = []
     for line in raw.split("\n"):
         line = re.sub(r"[ \t\u00a0]+", " ", line).strip()
-        if not line or NOISE.search(line):
-            continue
-        # bỏ dòng quá ngắn kiểu nút bấm
-        if len(line) < 3:
+        if not line or len(line) < 3 or NOISE.search(line):
             continue
         lines.append(line)
     return "\n".join(lines)
 
 
-def _same_page(a: str, b: str) -> bool:
-    pa, pb = urlparse(a), urlparse(b)
-    return (pa.netloc.lower(), pa.path.rstrip("/")) == (pb.netloc.lower(), pb.path.rstrip("/"))
+def _link_label(a) -> str:
+    return " ".join(
+        filter(
+            None,
+            [
+                a.get("class") or "",
+                a.get("id") or "",
+                a.get("aria-label") or "",
+                a.get("title") or "",
+                a.get("rel") or "",
+                (a.text_content() or "").strip()[:80],
+            ],
+        )
+    )
+
+
+def _chapter_num(url: str) -> int | None:
+    path = urlparse(url).path
+    m = _CH_NUM.search(path) or _CH_NUM.search(url)
+    if m:
+        return int(m.group(1))
+    m = _TRAIL_NUM.search(path)
+    if m:
+        return int(m.group(1))
+    return None
+
+
+def _infer_sibling_url(base: str, delta: int) -> str | None:
+    """
+    Người đôi khi đoán: chuong-12 → chuong-13.
+    Chỉ khi path có số chương rõ.
+    """
+    u = urlparse(base)
+    path = u.path
+    num = _chapter_num(base)
+    if num is None:
+        return None
+    new_num = num + delta
+    if new_num < 1:
+        return None
+
+    def repl_ch(m):
+        return m.group(0).replace(m.group(1), str(new_num))
+
+    new_path, nsub = _CH_NUM.subn(repl_ch, path, count=1)
+    if nsub == 0:
+        new_path, nsub = _TRAIL_NUM.subn(str(new_num) + (m.group(0)[len(m.group(1)) :] if (m := _TRAIL_NUM.search(path)) else ""), path, count=1)
+        if nsub == 0:
+            return None
+    return urlunparse((u.scheme, u.netloc, new_path, u.params, u.query, ""))
+
+
+def _score_nav_link(href: str, base: str, direction: str, label: str) -> int:
+    """Chấm link prev/next như mắt người: cùng site, có số chương, nhãn đúng."""
+    if not href or href.startswith(("#", "javascript:", "mailto:")):
+        return -999
+    full = urljoin(base, href)
+    if _same_page(full, base):
+        return -999
+    if not _same_host(full, base):
+        return -50
+
+    score = 10
+    path = urlparse(full).path.lower()
+    lab = label.lower()
+
+    if direction == "next":
+        if NEXT_RE.search(lab):
+            score += 40
+        if any(x in lab for x in ("sau", "next", "tiếp", "›", "»")):
+            score += 15
+        if PREV_RE.search(lab) and not NEXT_RE.search(lab):
+            score -= 30
+    else:
+        if PREV_RE.search(lab):
+            score += 40
+        if any(x in lab for x in ("trước", "prev", "‹", "«")):
+            score += 15
+        if NEXT_RE.search(lab) and not PREV_RE.search(lab):
+            score -= 30
+
+    if CHAPTER_URL_RE.search(path) or re.search(r"\d+", path):
+        score += 20
+
+    bn, fn = _chapter_num(base), _chapter_num(full)
+    if bn is not None and fn is not None:
+        if direction == "next" and fn == bn + 1:
+            score += 50
+        elif direction == "prev" and fn == bn - 1:
+            score += 50
+        elif direction == "next" and fn > bn:
+            score += 15
+        elif direction == "prev" and fn < bn:
+            score += 15
+        elif direction == "next" and fn < bn:
+            score -= 25
+        elif direction == "prev" and fn > bn:
+            score -= 25
+
+    # id/class rõ ràng
+    if direction == "next" and any(x in lab for x in ("next_chap", "next-chap", "btn-next", "id_next")):
+        score += 35
+    if direction == "prev" and any(x in lab for x in ("prev_chap", "prev-chap", "btn-prev", "id_prev")):
+        score += 35
+
+    if path in ("", "/"):
+        score -= 40
+    return score
 
 
 def _find_nav_link(tree, base: str, pattern: re.Pattern) -> str | None:
-    """Find prev/next chapter link; reject same-page / non-http / junk."""
-    candidates: list[str] = []
-
-    # 1) rel=next / rel=prev
-    rel = "next" if pattern is NEXT_RE else "prev"
-    for a in tree.xpath(f"//a[@rel='{rel}' and @href]"):
-        href = a.get("href") or ""
-        if href and not href.startswith(("#", "javascript:", "mailto:")):
-            candidates.append(urljoin(base, href))
-
-    # 2) class / id / text hints
-    hints = ("next", "sau", "tiếp") if pattern is NEXT_RE else ("prev", "previous", "truoc", "trước")
-    for a in tree.xpath("//a[@href]"):
-        blob = " ".join(
-            filter(
-                None,
-                [
-                    a.get("class") or "",
-                    a.get("id") or "",
-                    a.get("aria-label") or "",
-                    a.get("title") or "",
-                    a.text_content() or "",
-                ],
-            )
-        )
-        if pattern.search(blob) or any(h in blob.lower() for h in hints if len(h) > 2):
-            href = a.get("href") or ""
-            if href and not href.startswith(("#", "javascript:", "mailto:")):
-                candidates.append(urljoin(base, href))
-
-    # Prefer chapter-like paths; skip same page / home / list-only
+    """
+    Tìm prev/next như người: quét mọi <a>, chấm điểm, lấy cái hợp lý nhất.
+    pattern giữ tương thích sites.py (NEXT_RE / PREV_RE).
+    """
+    direction = "next" if pattern is NEXT_RE else "prev"
     scored: list[tuple[int, str]] = []
-    for full in candidates:
-        if _same_page(full, base):
+
+    for a in tree.xpath("//a[@href]"):
+        href = a.get("href") or ""
+        label = _link_label(a)
+        # rel=
+        rel = (a.get("rel") or "").lower()
+        if direction == "next" and "next" in rel:
+            label += " next"
+        if direction == "prev" and "prev" in rel:
+            label += " prev"
+
+        sc = _score_nav_link(href, base, direction, label)
+        if sc < 15:
             continue
-        path = urlparse(full).path.lower()
-        if path in ("", "/"):
-            continue
-        score = 0
-        if CHAPTER_URL_RE.search(path):
-            score += 5
-        if any(x in path for x in ("chuong", "chapter", "chap", "/c/", "episode")):
-            score += 3
-        if re.search(r"\d+", path):
-            score += 2
-        scored.append((score, full))
+        full = urljoin(base, href)
+        scored.append((sc, full))
+
     if not scored:
         return None
     scored.sort(key=lambda x: -x[0])
     return scored[0][1]
+
+
+def _nav_near_content(tree, base: str, content_el, direction: str) -> str | None:
+    """
+    Người hay bấm nút ngay dưới/trên khung chữ.
+    Lấy các <a> trong cùng parent / anh em kế bên content.
+    """
+    if content_el is None:
+        return None
+    pool = []
+    parent = content_el.getparent()
+    if parent is not None:
+        pool.extend(parent.xpath("./a[@href]|./div//a[@href]|./p//a[@href]"))
+        # sibling blocks (pager dưới chapter)
+        sib = content_el.getnext()
+        steps = 0
+        while sib is not None and steps < 4:
+            pool.extend(sib.xpath(".//a[@href]|self::a[@href]"))
+            sib = sib.getnext()
+            steps += 1
+        sib = content_el.getprevious()
+        steps = 0
+        while sib is not None and steps < 3:
+            pool.extend(sib.xpath(".//a[@href]|self::a[@href]"))
+            sib = sib.getprevious()
+            steps += 1
+
+    scored: list[tuple[int, str]] = []
+    seen = set()
+    for a in pool:
+        href = a.get("href") or ""
+        full = urljoin(base, href)
+        if full in seen:
+            continue
+        seen.add(full)
+        sc = _score_nav_link(href, base, direction, _link_label(a))
+        if sc >= 15:
+            scored.append((sc + 10, full))  # +10 vì gần content
+    if not scored:
+        return None
+    scored.sort(key=lambda x: -x[0])
+    return scored[0][1]
+
+
+def _resolve_nav(tree, base: str, content_el, direction: str) -> str | None:
+    """Thứ tự giống người: gần khung chữ → cả trang → đoán từ số URL."""
+    pattern = NEXT_RE if direction == "next" else PREV_RE
+    u = _nav_near_content(tree, base, content_el, direction)
+    if u:
+        return u
+    u = _find_nav_link(tree, base, pattern)
+    if u:
+        return u
+    return _infer_sibling_url(base, 1 if direction == "next" else -1)
 
 
 def _title_from_tree(tree) -> str:
@@ -255,6 +430,7 @@ def _title_from_tree(tree) -> str:
         "//*[contains(@class,'chapter-title')]//text()",
         "//*[contains(@class,'chap-title')]//text()",
         "//*[@id='chapter-title']//text()",
+        "//a[contains(@class,'chapter-title')]//text()",
         "//*[@property='og:title']/@content",
         "//title/text()",
     ):
@@ -263,7 +439,6 @@ def _title_from_tree(tree) -> str:
             t = " ".join(p.strip() for p in parts if p and str(p).strip())
             t = re.sub(r"\s+", " ", t).strip()
             if t:
-                # bỏ suffix site
                 t = re.split(r"\s*[\|\-–—]\s*", t)[0].strip()
                 return t or "Chương"
     return "Chương"
@@ -275,11 +450,9 @@ def _looks_like_chapter_link(text: str, href: str) -> bool:
         return False
     if CHAPTER_TITLE_RE.search(t):
         return True
-    # URL path chứa chapter-ish
     path = urlparse(href).path
     if CHAPTER_URL_RE.search(path):
         return True
-    # "1. Title" / "01 - Title" kiểu list
     if re.match(r"^\d{1,4}[\s\.\-_:：]+.+\S", t) and len(t) > 5:
         return True
     return False
@@ -288,8 +461,6 @@ def _looks_like_chapter_link(text: str, href: str) -> bool:
 def _extract_chapters(tree, base: str) -> list[ChapterRef]:
     seen: set[str] = set()
     chapters: list[ChapterRef] = []
-
-    # Ưu tiên khối list chương
     containers = tree.xpath(
         "//*[contains(@class,'chapter-list') or contains(@class,'chapters') or "
         "contains(@class,'list-chapter') or contains(@class,'chapter_list') or "
@@ -306,10 +477,8 @@ def _extract_chapters(tree, base: str) -> list[ChapterRef]:
         href = a.get("href") or ""
         if not href or href.startswith(("#", "javascript:", "mailto:")):
             continue
-        title = (a.text_content() or "").strip()
-        title = re.sub(r"\s+", " ", title)
+        title = re.sub(r"\s+", " ", (a.text_content() or "").strip())
         full = urljoin(base, href)
-        # bỏ query tracking dài
         if full in seen:
             continue
         if not _looks_like_chapter_link(title, full):
@@ -318,35 +487,50 @@ def _extract_chapters(tree, base: str) -> list[ChapterRef]:
         if not title:
             title = full.rstrip("/").split("/")[-1]
         chapters.append(ChapterRef(title, full))
-
     return chapters
 
 
 class GenericParser(SourceParser):
     async def get_chapter(self, url: str, html: str) -> Chapter:
         tree = lh.fromstring(html)
-        prev_url = _find_nav_link(tree, url, PREV_RE)
-        next_url = _find_nav_link(tree, url, NEXT_RE)
         title = _title_from_tree(tree)
 
+        # Làm sạch rác trước khi “nhìn” khối chữ
         _clean(tree)
         block = _best_block(tree)
         if block is None:
             raise ValueError(
-                "Không tìm thấy nội dung chương. Thử link chương cụ thể (có số chương trong URL) "
-                "hoặc trang có văn bản rõ ràng."
+                "Không thấy nội dung chương trên trang. "
+                "Thử link chương cụ thể (URL có số chương) hoặc trang có văn bản rõ."
             )
 
         text = _extract_text(block)
-        # Lọc dòng nhiễu còn sót
         lines = [ln for ln in text.split("\n") if ln.strip() and not NOISE.search(ln)]
         text = "\n".join(lines).strip()
 
         if len(text) < 50:
             raise ValueError(
-                "Nội dung quá ngắn hoặc trang bị chặn / cần JavaScript. "
-                "Thử link khác hoặc bật chế độ trình duyệt (Playwright)."
+                "Nội dung quá ngắn — trang có thể cần JavaScript / bị chặn. "
+                "Thử link khác hoặc cài Playwright."
             )
+
+        # Prev/next: gần khung chữ → cả trang → suy từ số URL
+        prev_url = _resolve_nav(tree, url, block, "prev")
+        next_url = _resolve_nav(tree, url, block, "next")
+
+        # Không cho next/prev trùng nhau hoặc trùng trang hiện tại
+        if next_url and _same_page(next_url, url):
+            next_url = _infer_sibling_url(url, 1)
+        if prev_url and _same_page(prev_url, url):
+            prev_url = _infer_sibling_url(url, -1)
+        if next_url and prev_url and _same_page(next_url, prev_url):
+            # một trong hai sai — tin số chương hơn
+            inferred_next = _infer_sibling_url(url, 1)
+            inferred_prev = _infer_sibling_url(url, -1)
+            if inferred_next:
+                next_url = inferred_next
+            if inferred_prev:
+                prev_url = inferred_prev
 
         return Chapter(title, text, prev_url, next_url)
 
@@ -354,21 +538,20 @@ class GenericParser(SourceParser):
         tree = lh.fromstring(html)
         title = _title_from_tree(tree)
         if title == "Chương":
-            title = (tree.xpath("//h1//text()") or tree.xpath("//title/text()") or ["Truyện"])[0]
+            title = (tree.xpath("//h1//text()") or ["Truyện"])[0]
             title = re.sub(r"\s+", " ", str(title)).strip()
-            title = re.split(r"\s*[\|\-–—]\s*", title)[0].strip() or "Truyện"
-
         cover = None
         for xp in (
             "//meta[@property='og:image']/@content",
-            "//meta[@name='twitter:image']/@content",
-            "//*[contains(@class,'cover')]//img/@src",
-            "//img[contains(@class,'cover')]/@src",
+            "//img[contains(@class,'cover') or contains(@class,'book')]/@src",
         ):
             found = tree.xpath(xp)
             if found:
                 cover = urljoin(url, found[0])
                 break
-
         chapters = _extract_chapters(tree, url)
-        return Novel(title, cover, chapters)
+        if not chapters:
+            raise ValueError(
+                "Không tìm thấy danh sách chương. Thử trang mục lục hoặc link chương đơn."
+            )
+        return Novel(title=title or "Truyện", cover=cover, chapters=chapters)
